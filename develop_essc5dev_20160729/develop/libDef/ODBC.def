@@ -1,0 +1,3 @@
+dbTypeLibs=$(CMM2003LIBDIR)unionDataBaseType.odbc.o
+realDBLibs = $(CMM2003LIBDIR)unionRealBaseDB.odbc.2.0.o		\
+		-L$(DB2LIBDIR) -ldb2

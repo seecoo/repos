@@ -1,0 +1,1095 @@
+/*
+ * Copyright (c) 2009 Union Tech.
+ * All rights reserved.
+ *
+ * Created on: 2010-2-22
+ *   @Author: wangk
+ *   @Version 1.0
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <stdlib.h>
+
+#include "unionErrCode.h"
+#include "UnionLog.h"
+#include "UnionStr.h"
+
+#include "unionRealBaseDB.h"
+#include "unionTblDef.h"
+#include "unionTableDef.h"
+
+#include <mysql.h>
+
+MYSQL gunionMysql;
+MYSQL *gunionSock = NULL;
+
+MYSQL gunionBackupMysql;
+MYSQL *gunionBackupSock = NULL;
+
+// 取值数据库错误码，并设置日志的错误码
+int UnionGetDBErrCode()
+{
+	int			ret;
+
+	//ret = 0-abs(sqlCode);
+
+	ret = 0 - abs(mysql_errno(&gunionMysql));
+	if(ret < 0)
+	{
+		UnionLog("in UnionGetDBErrCode:::: dbsqlcode = [%d] errstr = [%s]\n", mysql_errno(&gunionMysql), mysql_error(&gunionMysql));
+	}
+
+	// 设计数据库错误码偏移
+	// ret = ret + mysqlErrCodeOffset .......
+
+	return(UnionSetUserDefinedErrorCode(ret));
+}
+
+// 是否是数据致命错误(需要重连数据库的错误，在unionREC表中配置)
+int UnionIsFatalDBErrCode(int dbErrCode)
+{
+	int	ret;
+	char	varName[100];
+
+	memset(varName, 0, sizeof varName);
+
+	sprintf(varName, "fatalMYSQLDBErr%d", abs(dbErrCode));
+	if (UnionReadIntTypeRECVar(varName) > 0)
+	{
+		return(1);
+	}
+
+	return 0;
+}
+
+/** modify by xusj 2010-10-21 end **/
+
+/*
+函数功能：
+连接数据库
+输入参数：
+timeout：超时(秒)，>=0超时时间，<0不设置超时
+输出参数：无
+函数返回：
+0成功，<0失败
+*/
+int UnionConnectDatabaseWithTimeOut(int timeout)
+{
+	int ret = 0;
+	int seconds = 0;
+	char szDBHostAddr[64];
+
+	char DBUserName[64];
+	char DBPasswd[64];
+	char DBname[64];
+
+	memset(DBUserName, 0, sizeof(DBUserName));
+	memset(DBPasswd, 0, sizeof(DBPasswd));
+	memset(DBname, 0, sizeof(DBname));
+
+	memset(szDBHostAddr, 0, sizeof(szDBHostAddr));
+	if( getenv("DBHOSTADDR") == NULL )
+	{
+		strcpy(szDBHostAddr, "127.0.0.1");
+	}
+	else
+	{
+		strcpy(szDBHostAddr, getenv("DBHOSTADDR"));
+	}
+
+	mysql_init(&gunionMysql);
+	while (1)
+	{
+		if( !(gunionSock = mysql_real_connect(&gunionMysql, szDBHostAddr, DBUserName, DBPasswd, DBname, 0, NULL, 0)) )
+		{
+			UnionUserErrLog("in UnionConnectDatabaseWithTimeOut:: szDBHostAddr = [%s] DBname = [%s] DBUserName = [%s]\n",szDBHostAddr,DBname,DBUserName);
+			UnionUserErrLog("in UnionConnectDatabaseWithTimeOut:: database mysql error = [%s]\n", mysql_error(&gunionMysql));
+			if ((timeout >= 0) && (seconds < timeout))
+			{
+				seconds++;
+				sleep(1);
+			}
+			else
+			{
+				if( (timeout >= 0) && (seconds >= timeout) )
+					break;
+				else
+					sleep(1);
+			}
+		}
+		else
+		{
+				return(0);
+		}
+	}
+
+	return(ret);
+}
+
+int UnionConnectDB()
+{
+	int		ret;
+	char		szDBHostAddr[64];
+
+	char		dbUser[64];
+	char		dbPasswd[64];
+	char		dbName[64];
+	
+
+	memset(szDBHostAddr, 0, sizeof(szDBHostAddr));
+	if( getenv("DBHOSTADDR") == NULL )
+	{
+		strcpy(szDBHostAddr, "localhost");
+	}
+	else
+	{
+		strcpy(szDBHostAddr, getenv("DBHOSTADDR"));
+	}
+
+	memset(dbUser, 0, sizeof(dbUser));
+	memset(dbPasswd, 0, sizeof(dbPasswd));
+	memset(dbName, 0, sizeof(dbName));
+
+	UnionGetDBUSER(dbUser);
+	UnionGetDBPASSWD(dbPasswd);
+	UnionGetDBNAME(dbName);
+
+	mysql_init((MYSQL *)&gunionMysql);
+
+	UnionProgramerLog("in UnionConnectDB:: try to connect Addr=[%s] dbName=[%s] dbUser=[%s]!\n", szDBHostAddr, dbName, dbUser);
+	if(strlen(dbUser) == 0 || strlen(dbPasswd) == 0 || strlen(dbName) == 0)
+	{
+		UnionUserErrLog("in UnionConnectDB:: dbName = [%s] dbUser = [%s] dbPasswd_len = [%d] !!!\n", dbName, dbUser, strlen(dbPasswd));
+		return(UnionSetUserDefinedErrorCode(errCodeParameter));
+	}
+
+	UnionProgramerLog("in UnionConnectDB:: try to connect Addr=[%s] dbName=[%s] dbUser=[%s]\n", szDBHostAddr, dbName, dbUser);
+	if(!(gunionSock = mysql_real_connect(&gunionMysql, szDBHostAddr, dbUser, dbPasswd, dbName, 0, NULL, 0)))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionConnectDB:: failure errcode = [%d] szDBHostAddr = [%s] dbName = [%s] dbUser = [%s] dbPasswd_len = [%d]\n", ret, szDBHostAddr, dbName, dbUser, strlen(dbPasswd));
+		return(ret);
+	}
+	UnionLog("in UnionConnectDB:: connect OK!\n");
+
+	return(0);
+}
+
+int UnionConnectBackupDB()
+{
+	int	ret;
+
+	char	db_usr[128+1];
+	char	db_pass[128+1];
+	char	db_name[128+1];
+	char	db_addr[128+1];
+		
+	/* 设置连接备份数据库的用户名、密码 */
+	memset(db_usr,0,sizeof(db_usr));
+	strcpy(db_usr,getenv("BACKUPDBUSER"));
+	memset(db_pass,0,sizeof(db_pass));
+	strcpy(db_pass,getenv("BACKUPDBPASSWD"));
+	memset(db_name,0,sizeof(db_name));
+	strcpy(db_name,getenv("BACKUPDBNAME"));
+	memset(db_addr,0,sizeof(db_addr));
+	strcpy(db_addr,getenv("BACKUPDBHOSTADDR"));
+
+	mysql_init(&gunionBackupMysql);
+
+	if( !(gunionBackupSock = mysql_real_connect(&gunionBackupMysql, db_addr, db_usr, db_pass, db_name, 0, NULL, 0)) )
+	{
+		UnionUserErrLog("in UnionConnectDatabaseWithTimeOut:: db_addr = [%s] db_name = [%s] db_usr = [%s]\n", db_addr, db_name, db_usr);
+		UnionUserErrLog("in UnionConnectDatabaseWithTimeOut:: database mysql error = [%s]\n", mysql_error(&gunionBackupMysql));
+		return(UnionSetUserDefinedErrorCode(0-abs(mysql_errno(&gunionBackupMysql))));
+	}
+	
+	return(0);
+}
+
+int UnionCloseDB()
+{
+	int	ret;
+
+	if(mysql_rollback(gunionSock))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionCloseDB:: mysql_rollback mysql_error = [%d]\n", ret);
+		//return(ret);
+	}
+
+	mysql_close(gunionSock);
+
+	UnionLog("in UnionCloseDB:: close DB OK!\n");
+
+	return(0);
+}
+
+int UnionCloseBackupDB()
+{
+	int	ret;
+
+	if( !mysql_rollback(gunionBackupSock) )
+	{
+		UnionUserErrLog("in UnionCloseDatabase:: mysql_rollback mysql_error = [%s]\n", mysql_error(gunionBackupSock));
+		//return(0-abs(mysql_errno(gunionMysql)));
+	}
+
+	mysql_close(gunionBackupSock);
+
+	return(0);
+}
+
+int UnionSelectRealDBRecord(char *tableName,char *field,char *condition,char *record,int sizeOfRecord,char *fileName)
+{
+	int     numOfPerPage=0,currPage=0,isUseNewMech=1;
+	int     beginNum=0,endNum=0;
+	char    tmpStr[20+1];
+	int	i;
+	int	ret;
+	int	sqlLen;
+	FILE	*fp;
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	MYSQL_FIELD *mySqlField;
+	unsigned int uiCnt = 0;
+	unsigned int uiFieldNum = 0;
+	char szDefFldName[100];
+
+	memset(tmpStr, 0, sizeof tmpStr);
+
+	int	count;
+	char	sql[8192+1];
+	char	v_tableName[128];
+	PUnionTableDef	pobj = NULL;
+	char szColData[4096+1];
+	int iColDataLen = 0;
+	int iRecCnt = 0;
+
+	char	primaryList[256];
+
+
+	if ((record == NULL) && (fileName == NULL))
+        {
+                UnionUserErrLog("in UnionSelectRealDBRecord:: record && fileName is null\n");
+                return(UnionSetUserDefinedErrorCode(errCodeParameter));
+        }
+
+	// 根据对象名，读取该对象的定义
+	if((pobj = UnionFindTableDef(tableName)) == NULL)
+	{
+		ret = UnionSetUserDefinedErrorCode(errCodeParameter);
+		UnionUserErrLog("in UnionSelectRealDBRecord :: tableName = [%s] not found in image!\n", tableName);
+		return(ret);
+	}
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecord:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+	
+	memset(tmpStr, 0, sizeof tmpStr);
+	if (UnionReadRecFldFromRecStr(condition,strlen(condition),"currentPage",tmpStr,sizeof(tmpStr)) < 0)
+	{
+		isUseNewMech=0;
+	}
+	else
+	{
+		currPage = atoi(tmpStr);
+	}
+	memset(tmpStr, 0, sizeof tmpStr);
+	if (UnionReadRecFldFromRecStr(condition,strlen(condition),"numOfPerPage",tmpStr,sizeof(tmpStr)) < 0)
+	{
+		isUseNewMech=0;
+	}
+	else
+	{
+		numOfPerPage = atoi(tmpStr);
+	}
+	if (isUseNewMech)
+	{
+		beginNum = (currPage-1)*numOfPerPage;
+		endNum = beginNum + numOfPerPage;
+		UnionDeleteRecFldFromRecStr(condition,"currentPage");
+		UnionDeleteRecFldFromRecStr(condition,"numOfPerPage");
+
+		memset(sql, 0, sizeof sql);
+		if ((condition == NULL) || (strlen(condition) == 0))
+			sprintf(sql,"select count(1) from %s",tableName);
+		    else
+			sprintf(sql,"select count(1) from %s where %s",tableName, condition);
+
+		UnionProgramerLog("in UnionSelectRealDBRecord:: isUseNewMech sql=[%s]!\n",sql);
+
+		if( mysql_query(gunionSock, sql) )
+		{
+			UnionUserErrLog("in UnionSelectRealDBRecord:: mysql_query sql=[%s],errcode=[%d]!\n", sql, mysql_errno(gunionSock));
+			ret = 0-abs(mysql_errno(gunionSock));
+			UnionCloseDatabase();
+			return(UnionSetUserDefinedErrorCode(ret));
+		}
+		if( !(res = mysql_store_result(gunionSock)) )
+		{
+			UnionUserErrLog("in UnionSelectRealDBRecord:: mysql_store_result error, errcode=[%d]!\n", mysql_errno(gunionSock));
+			ret = 0-abs(mysql_errno(gunionSock));
+			UnionCloseDatabase();
+			return(UnionSetUserDefinedErrorCode(ret));
+		}
+		if( !(row = mysql_fetch_row(res)) )
+		{
+			UnionUserErrLog("in UnionSelectRealDBRecord:: mysql_fetch_row error, errcode=[%d]!\n", mysql_errno(gunionSock));
+			ret = 0-abs(mysql_errno(gunionSock));
+			UnionCloseDatabase();
+			return(UnionSetUserDefinedErrorCode(ret));
+		}
+		if( row[0] )
+		{
+			count = atoi(row[0]);
+		}
+		else
+		{
+			count = 0;
+		}
+		mysql_free_result(res);
+
+		if ( count == 0)
+		{
+			UnionLog("in UnionSelectRealDBRecord::count is 0\n");
+			if (fileName != NULL)
+			{
+				if ((fp = fopen(fileName,"w")) == NULL)
+				{
+					return(UnionSetUserDefinedErrorCode(errCodeUseOSErrCode));
+				}
+				fclose(fp);
+			}
+			return(0);
+		}
+	}
+
+	memset(sql, 0, sizeof(sql));
+	if ((condition == NULL) || (strlen(condition) == 0))
+		sprintf(sql,"select %s from %s",field,tableName);
+	else
+		sprintf(sql,"select %s from %s where %s",field,tableName,condition);
+
+	if ((fileName != NULL) && (strlen(fileName) != 0))
+	{
+		if (strstr(sql,"order by") == NULL)
+		{
+			sqlLen = strlen(sql);
+			memset(primaryList, 0, sizeof(primaryList));
+			if ((ret = UnionFormTablePrimaryKeyList(tableName, primaryList)) >= 0 && strlen(primaryList) > 0)
+			{
+				sprintf(sql + sqlLen, " order by %s", primaryList);
+			}
+		}
+	}
+
+	UnionProgramerLog("in UnionSelectRealDBRecord:: sql=[%s]!\n",sql);
+
+	if( mysql_query(gunionSock, sql) )
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionSelectRealDBRecord:: mysql_query sql=[%s],errcode=[%d]!\n", sql, mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(ret);
+	}
+	if( !(res = mysql_store_result(gunionSock)) )
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionSelectRealDBRecord:: mysql_store_result error, errcode=[%d]!\n", mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(ret);
+	}
+
+	if (fileName != NULL)
+	{
+		if ((fp = fopen(fileName,"w")) == NULL)
+		{
+			mysql_free_result(res);
+			return(UnionSetUserDefinedErrorCode(errCodeUseOSErrCode));
+		}
+	}
+
+	/* 输出结果*/
+	if( isUseNewMech )
+	{
+		mysql_data_seek(res, (my_ulonglong)beginNum);
+		i = beginNum;
+		iRecCnt = 0;
+		while( (row = mysql_fetch_row(res)) && i < endNum )
+		{
+			memset(szColData, 0, sizeof(szColData));
+			iColDataLen = 0;
+
+			uiFieldNum = mysql_num_fields(res);
+			for( uiCnt = 0; uiCnt < uiFieldNum; uiCnt++ )
+			{
+				mySqlField = mysql_fetch_field_direct(res, uiCnt);
+				if( (ret = UnionConvertObjectFldName(pobj, mySqlField->name, szDefFldName)) < 0 )
+				{
+					if( ret == errCodeObjectMDL_FieldNotExist )
+						continue;
+					strcpy(szDefFldName, mySqlField->name);
+				}
+
+				if( row[uiCnt] )
+				{
+					UnionFilterHeadAndTailBlank(row[uiCnt]);
+					if( (ret = UnionPutRecFldIntoRecStr(szDefFldName, row[uiCnt], strlen(row[uiCnt]), szColData+iColDataLen, 
+						sizeof(szColData)-iColDataLen)) < 0 )
+					{
+						UnionUserErrLog("in UnionSelectRealDBRecord:: UnionPutRecFldIntoRecStr [%s]!\n", szDefFldName);
+						if( fileName != NULL )
+						{
+							fflush(fp);
+							fclose(fp);
+						}
+						mysql_free_result(res);
+						return (ret);
+					}
+					iColDataLen+=ret;
+				}
+				else
+				{
+					if( (ret = UnionPutRecFldIntoRecStr(szDefFldName, "", 0, szColData+iColDataLen, 
+						sizeof(szColData)-iColDataLen)) < 0 )
+					{
+						UnionUserErrLog("in UnionSelectRealDBRecord:: UnionPutRecFldIntoRecStr [%s]!\n", szDefFldName);
+						if( fileName != NULL )
+						{
+							fflush(fp);
+							fclose(fp);
+						}
+						mysql_free_result(res);
+						return (ret);
+					}
+					iColDataLen+=ret;
+				}
+			}
+
+			if( fileName != NULL )
+			{
+				fprintf(fp, "%s\n", szColData);
+			}
+			else
+			{
+				if (iColDataLen >= sizeOfRecord)
+				{
+					UnionUserErrLog("in UnionSelectRealDBRecord:: sizeOfRecord[%d] <= strColDataLen[%d]\n",sizeOfRecord,iColDataLen);
+					mysql_free_result(res);
+					return (UnionSetUserDefinedErrorCode(errCodeSmallBuffer));
+				}
+
+				strncpy(record, szColData, iColDataLen);
+				ret = iColDataLen;
+				break;
+			}
+
+			iRecCnt++;
+			i++;
+		}
+		ret = iRecCnt;
+	}
+	else
+	{
+		iRecCnt = 0;
+		while( (row = mysql_fetch_row(res)) )
+		{
+			memset(szColData, 0, sizeof(szColData));
+			iColDataLen = 0;
+
+			uiFieldNum = mysql_num_fields(res);
+			for( uiCnt = 0; uiCnt < uiFieldNum; uiCnt++ )
+			{
+				mySqlField = mysql_fetch_field_direct(res, uiCnt);
+				if( (ret = UnionConvertObjectFldName(pobj, mySqlField->name, szDefFldName)) < 0 )
+				{
+					if( ret == errCodeObjectMDL_FieldNotExist )
+						continue;
+					strcpy(szDefFldName, mySqlField->name);
+				}
+
+				if( row[uiCnt] )
+				{
+					UnionFilterHeadAndTailBlank(row[uiCnt]);
+					if( (ret = UnionPutRecFldIntoRecStr(szDefFldName, row[uiCnt], strlen(row[uiCnt]), szColData+iColDataLen, 
+						sizeof(szColData)-iColDataLen)) < 0 )
+					{
+						UnionUserErrLog("in UnionSelectRealDBRecord:: UnionPutRecFldIntoRecStr [%s]!\n", szDefFldName);
+						if( fileName != NULL )
+						{
+							fflush(fp);
+							fclose(fp);
+						}
+						mysql_free_result(res);
+						return (ret);
+					}
+					iColDataLen+=ret;
+				}
+				else
+				{
+					if( (ret = UnionPutRecFldIntoRecStr(szDefFldName, "", 0, szColData+iColDataLen, 
+						sizeof(szColData)-iColDataLen)) < 0 )
+					{
+						UnionUserErrLog("in UnionSelectRealDBRecord:: UnionPutRecFldIntoRecStr [%s]!\n", szDefFldName);
+						if( fileName != NULL )
+						{
+							fflush(fp);
+							fclose(fp);
+						}
+						mysql_free_result(res);
+						return (ret);
+					}
+					iColDataLen+=ret;
+				}
+			}
+			if( fileName != NULL )
+			{
+				fprintf(fp, "%s\n", szColData);
+			}
+			else
+			{
+				if (iColDataLen >= sizeOfRecord)
+				{
+					UnionUserErrLog("in UnionSelectRealDBRecord:: sizeOfRecord[%d] <= strColDataLen[%d]\n",sizeOfRecord,iColDataLen);
+					mysql_free_result(res);
+					return (UnionSetUserDefinedErrorCode(errCodeSmallBuffer));
+				}
+
+				strncpy(record, szColData, iColDataLen);
+				ret = iColDataLen;
+				break;
+			}
+
+			iRecCnt++;
+		}
+		if( fileName != NULL )
+		{
+			ret = iRecCnt;
+		}
+	}
+
+	if( fileName != NULL )
+	{
+		if (isUseNewMech)
+                {
+                        memset(tmpStr, 0, sizeof tmpStr);
+                        sprintf(tmpStr, "%s=%d", "totalRecNum", count);
+                        fputs(tmpStr,fp);
+		}
+		fflush(fp);
+		fclose(fp);
+	}
+	mysql_free_result(res);
+	return(ret);
+}
+
+int UnionSelectRealDBRecordCounts(char *tableName,char *condition)
+{
+	int	i;
+	int	ret;
+	int	sqlLen;
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	MYSQL_FIELD *mySqlField;
+	unsigned int uiCnt = 0;
+	unsigned int uiFieldNum = 0;
+	char szDefFldName[100];
+
+	int	count;
+	char	sql[8192+1];
+	char	v_tableName[128];
+	char szColData[4096+1];
+	int iColDataLen = 0;
+	int iRecCnt = 0;
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+	
+	memset(sql, 0, sizeof sql);
+	if ((condition == NULL) || (strlen(condition) == 0))
+		sprintf(sql,"select count(1) from %s",tableName);
+            else
+		sprintf(sql,"select count(1) from %s where %s",tableName, condition);
+
+	UnionProgramerLog("in UnionSelectRealDBRecordCounts:: sql=[%s]!\n",sql);
+
+	if( mysql_query(gunionSock, sql) )
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: mysql_query sql=[%s], errcode=[%d]!\n", sql, mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(ret);
+	}
+	if( !(res = mysql_store_result(gunionSock)) )
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: mysql_store_result error, errcode=[%d]!\n", mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+	if( !(row = mysql_fetch_row(res)) )
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: mysql_fetch_row error, errcode=[%d]!\n", mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+	if( row[0] )
+	{
+		count = atoi(row[0]);
+	}
+	else
+	{
+		count = 0;
+	}
+	mysql_free_result(res);
+	return(count);
+}
+
+int UnionSelectDBRecordByRealSQL(char *tableName,char *strSql,char *record,int sizeOfRecord,char *fileName)
+{
+	int	i;
+	int	ret;
+	int	sqlLen;
+	FILE	*fp;
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	MYSQL_FIELD *mySqlField;
+	unsigned int uiCnt = 0;
+	unsigned int uiFieldNum = 0;
+	char szDefFldName[100];
+
+	int	count;
+	char	v_tableName[128];
+	PUnionTableDef	pobj = NULL;
+	char szColData[4096+1];
+	int iColDataLen = 0;
+	int iRecCnt = 0;
+
+	if ((fileName == NULL) && (record == NULL))
+	{
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: err parameter!\n");
+		return(UnionSetUserDefinedErrorCode(errCodeParameter));
+	}
+
+	// 根据对象名，读取该对象的定义
+	if((pobj = UnionFindTableDef(tableName)) == NULL)
+	{
+		ret = UnionSetUserDefinedErrorCode(errCodeParameter);
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL :: tableName = [%s] not found in image!\n", tableName);
+		return(ret);
+	}
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+	
+	UnionProgramerLog("in UnionSelectDBRecordByRealSQL:: sql=[%s]!\n",strSql);
+
+	if( mysql_query(gunionSock, strSql) )
+	{
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: sql=[%s],errcode=[%d]!\n", strSql, mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+	if( !(res = mysql_store_result(gunionSock)) )
+	{
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: mysql_store_result error, errcode=[%d]!\n", mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	if (fileName != NULL)
+	{
+		if ((fp = fopen(fileName,"w")) == NULL)
+		{
+			mysql_free_result(res);
+			return(UnionSetUserDefinedErrorCode(errCodeUseOSErrCode));
+		}
+	}
+
+	/* 输出结果*/
+	iRecCnt = 0;
+	while( row = mysql_fetch_row(res) )
+	{
+		memset(szColData, 0, sizeof(szColData));
+		iColDataLen = 0;
+
+		uiFieldNum = mysql_num_fields(res);
+		for( uiCnt = 0; uiCnt < uiFieldNum; uiCnt++ )
+		{
+			mySqlField = mysql_fetch_field_direct(res, uiCnt);
+			if( (ret = UnionConvertObjectFldName(pobj, mySqlField->name, szDefFldName)) < 0 )
+			{
+				if( ret == errCodeObjectMDL_FieldNotExist )
+					continue;
+				strcpy(szDefFldName, mySqlField->name);
+			}
+
+			if( row[uiCnt] )
+			{
+				UnionFilterHeadAndTailBlank(row[uiCnt]);
+				if( (ret = UnionPutRecFldIntoRecStr(szDefFldName, row[uiCnt], strlen(row[uiCnt]), szColData+iColDataLen, 
+					sizeof(szColData)-iColDataLen)) < 0 )
+				{
+					UnionUserErrLog("in UnionSelectRealDBRecord:: UnionPutRecFldIntoRecStr [%s]!\n", szDefFldName);
+					if( fileName != NULL )
+					{
+						fflush(fp);
+						fclose(fp);
+					}
+					mysql_free_result(res);
+					return (ret);
+				}
+				iColDataLen+=ret;
+			}
+			else
+			{
+				if( (ret = UnionPutRecFldIntoRecStr(szDefFldName, "", 0, szColData+iColDataLen, 
+					sizeof(szColData)-iColDataLen)) < 0 )
+				{
+					UnionUserErrLog("in UnionSelectRealDBRecord:: UnionPutRecFldIntoRecStr [%s]!\n", szDefFldName);
+					if( fileName != NULL )
+					{
+						fflush(fp);
+						fclose(fp);
+					}
+					mysql_free_result(res);
+					return (ret);
+				}
+				iColDataLen+=ret;
+			}
+		}
+		if( fileName != NULL )
+		{
+			fprintf(fp, "%s\n", szColData);
+		}
+		else
+		{
+			if (iColDataLen >= sizeOfRecord)
+			{
+				UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: sizeOfRecord[%d] <= strColDataLen[%d]\n",sizeOfRecord,iColDataLen);
+				mysql_free_result(res);
+				return (UnionSetUserDefinedErrorCode(errCodeSmallBuffer));
+			}
+
+			strncpy(record, szColData, iColDataLen);
+			ret = iColDataLen;
+			break;
+		}
+
+		iRecCnt++;
+	}
+	if( fileName != NULL )
+	{
+		ret = iRecCnt;
+	}
+
+	if( fileName != NULL )
+	{
+		fflush(fp);
+		fclose(fp);
+	}
+	mysql_free_result(res);
+	return(ret);
+}
+
+int UnionUpdateRealDBRecord(char *tableName,char *field,char *condition)
+{
+	int	ret = 0;
+	char	sql[8192*2+1];
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionLog("in UnionUpdateRealDBRecord:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	memset(sql,0,sizeof(sql));
+	if ((condition == NULL) || (strlen(condition) == 0))
+		sprintf(sql,"update %s set %s",tableName,field);
+	else
+		sprintf(sql,"update %s set %s where %s",tableName,field,condition);
+
+	UnionProgramerLog("in UnionUpdateRealDBRecord::sql=[%s]\n", sql);
+
+	if( mysql_query(gunionSock, sql) )
+	{
+		UnionUserErrLog("in UnionUpdateRealDBRecord:: sql=[%s],errcode=[%d]!\n", sql, mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	if( mysql_commit(gunionSock) )
+	{
+		UnionUserErrLog("in UnionUpdateRealDBRecord:: mysql_commit error,errcode=[%d]!\n", mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	return(0);
+}
+
+int UnionInsertRealDBRecord(char *tableName,char *record,int lenOfRecord)
+{
+	int	ret = 0;
+	char	sql[8192*2+1];
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionLog("in UnionInsertRealDBRecord:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	memset(sql,0,sizeof(sql));
+	sprintf(sql,"insert into %s %s",tableName,record);
+
+	UnionProgramerLog("in UnionInsertRealDBRecord::sql=[%s]\n", sql);
+
+	if( mysql_query(gunionSock, sql) )
+	{
+		UnionUserErrLog("in UnionInsertRealDBRecord:: sql=[%s],errcode=[%d]!\n", sql, mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		if( ret = -1022 )
+		{
+			ret = errCodeObjectMDL_PrimaryKeyIsRepeat;
+		}
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	if( mysql_commit(gunionSock) )
+	{
+		UnionUserErrLog("in UnionInsertRealDBRecord:: mysql_commit error,errcode=[%d]!\n", mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	return(0);
+}
+
+int UnionDeleteRealDBRecord(char *tableName,char *condition)
+{
+	int	ret = 0;
+	char	sql[1024+1];
+	
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionLog("in UnionDeleteRealDBRecord:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	memset(sql,0,sizeof(sql));
+	if ( (condition == NULL) || (strlen(condition) == 0))
+		sprintf(sql,"delete from %s",tableName);
+	else
+		sprintf(sql,"delete from %s where %s",tableName,condition);
+
+	if( mysql_query(gunionSock, sql) )
+	{
+		UnionUserErrLog("in UnionDeleteRealDBRecord:: sql=[%s],errcode=[%d]!\n", sql, mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	if( mysql_commit(gunionSock) )
+	{
+		UnionUserErrLog("in UnionDeleteRealDBRecord:: mysql_commit error,errcode=[%d]!\n", mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	return(0);
+}
+
+int UnionExecRealDBSql(char *sql)
+{
+	int	ret = 0;
+	int	cnt = 0;
+	char	sqlStr[1024*2+1];
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionLog("in UnionExecRealDBSql:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	memset(sqlStr, 0, sizeof(sqlStr));
+	strcpy(sqlStr, sql);
+
+	if( mysql_query(gunionSock, sql) )
+	{
+		UnionUserErrLog("in UnionExecRealDBSql:: sql=[%s],errcode=[%d]!\n", sql, mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	cnt = (int)mysql_affected_rows(gunionSock);
+	UnionProgramerLog("in UnionExecRealDBSql::cnt=[%d]\n", cnt);
+
+	if( mysql_commit(gunionSock) )
+	{
+		UnionUserErrLog("in UnionExecRealDBSql:: mysql_commit error,errcode=[%d]!\n", mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	return(cnt);
+}
+
+int UnionExecRealDBSqlByCommit(char *sql,int flag)
+{
+	int	ret = 0;
+	int	cnt = 0;
+	char	sqlStr[1024*2+1];
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionLog("in UnionExecRealDBSqlByCommit:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	memset(sqlStr, 0, sizeof(sqlStr));
+	strcpy(sqlStr, sql);
+
+	if( mysql_query(gunionSock, sql) )
+	{
+		UnionUserErrLog("in UnionExecRealDBSqlByCommit:: sql=[%s],errcode=[%d]!\n", sql, mysql_errno(gunionSock));
+		ret = 0-abs(mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	if (flag)
+	{
+		cnt = (int)mysql_affected_rows(gunionSock);
+		UnionProgramerLog("in UnionExecRealDBSqlByCommit::cnt=[%d]\n", cnt);
+
+		if( mysql_commit(gunionSock) )
+		{
+			UnionUserErrLog("in UnionExecRealDBSqlByCommit:: mysql_commit error,errcode=[%d]!\n", mysql_errno(gunionSock));
+			ret = 0-abs(mysql_errno(gunionSock));
+			UnionCloseDatabase();
+			return(UnionSetUserDefinedErrorCode(ret));
+		}
+	}
+
+	return(cnt);
+}
+
+
+// Add By Huangbaoxin, 2009/10/15
+int UnionOpenRealDBSql(char *sql, char *record, int sizeOfRecord)
+{
+	int	ret = 0;
+	char szDefFldName[128+1];
+	char sqlStr[1024+1];
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	unsigned int uiCnt = 0;
+	unsigned int uiFieldNum = 0;
+	
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionOpenRealDBSql:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+	
+	memset(sqlStr, 0, sizeof(sqlStr));
+	strcpy(sqlStr, sql);
+
+	UnionProgramerLog("in UnionOpenRealDBSql::sqlStr=[%s]\n", sqlStr);
+	
+	if( mysql_query(gunionSock, sql) )
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionOpenRealDBSql:: mysql_query sql=[%s],errcode=[%d]!\n", sql, mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(ret);
+	}
+	if( !(res = mysql_store_result(gunionSock)) )
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionOpenRealDBSql:: mysql_store_result error, errcode=[%d]!\n", mysql_errno(gunionSock));
+		UnionCloseDatabase();
+		return(ret);
+	}
+
+	while( row = mysql_fetch_row(res) )
+	{
+		uiFieldNum = mysql_num_fields(res);
+		for( uiCnt = 0; uiCnt < uiFieldNum; uiCnt++ )
+		{
+			sprintf(szDefFldName, "FIELD%u", uiCnt);
+
+			if( row[uiCnt] )
+			{
+				UnionFilterHeadAndTailBlank(row[uiCnt]);
+				if( (ret = UnionPutRecFldIntoRecStr(szDefFldName, row[uiCnt], strlen(row[uiCnt]), 
+					record + strlen(record), sizeOfRecord - strlen(record))) < 0 )
+				{
+					UnionUserErrLog("in UnionSelectRealDBRecord:: UnionPutRecFldIntoRecStr [%s]!\n", szDefFldName);
+					mysql_free_result(res);
+					return (ret);
+				}
+			}
+			else
+			{
+				if( (ret = UnionPutRecFldIntoRecStr(szDefFldName, "", 0, 
+					record + strlen(record), sizeOfRecord - strlen(record))) < 0 )
+				{
+					UnionUserErrLog("in UnionSelectRealDBRecord:: UnionPutRecFldIntoRecStr [%s]!\n", szDefFldName);
+					mysql_free_result(res);
+					return (ret);
+				}
+			}
+		}
+
+		break;
+	}
+
+	mysql_free_result(res);
+
+	return(strlen(record));
+}
+
+/*
+char *UnionGetDBUserName()
+{
+	return  DBname;
+}
+*/
+
+int UnionGetDBSequenceValueOfICCardID(char *certID)
+{
+	int                     ret;
+        
+	ret = errCodeObjectMDL_ObjectDefinitionNotExists;
+	UnionProgramerLog("in UnionGetDBSequenceValueOfICCardID:: not support!!!! ret = [%d]\n", ret);
+	return(UnionSetUserDefinedErrorCode(ret));
+}
+
+int UnionSelectOneFieldBySQL(char *fldDescription, char *tableName, char *condition, int lenOfResultBuf, char *resultBuf)
+{
+	UnionUserErrLog("in UnionSelectOneFieldBySQL:: mysql no support this function ~!");
+	return(-1);
+}

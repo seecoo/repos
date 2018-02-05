@@ -1,0 +1,864 @@
+#ifndef _realBaseDB_2_x_
+#define _realBaseDB_2_x_
+#endif
+
+#ifndef _UnionLogMDL_3_x_
+#define _UnionLogMDL_3_x_
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <assert.h>
+
+#include "sqlcli1.h"       
+
+#include "unionErrCode.h"
+#include "UnionLog.h"
+#include "UnionStr.h"
+#include "unionREC.h"
+
+#include "unionRealBaseDB.h"
+#include "unionRealDBCommon.h"
+#include "unionXMLPackage.h"
+
+#define errCodeRecordNotFound		(errCodeOffsetOfDatabase-100)	//记录不存在
+#define errCodeSQLExec			(errCodeOffsetOfDatabase-101)	//sql执行出错
+#define errCodeRecordAlreadyExist	(errCodeOffsetOfDatabase-102)	//数据已经存在(关键字段数据重复)
+#define errCodeConnectFailed		(errCodeOffsetOfDatabase-103)	//数据库连接失
+
+#define MAX_UNIONDB_COL_NUM     64
+
+/*
+#define MAX_UNIONDB_COL_NUM     64
+
+// 字段定义
+typedef struct
+{
+	char			tag[64];		// 字段名称
+	int			type;			// 字段类型
+	int			isNull;
+	int			len;			
+	int			isLen;
+	void			*value;
+} TUnionDBField;
+
+typedef TUnionDBField	*PUnionDBField;
+
+// 记录定义
+typedef struct
+{
+	int			colNum;
+	TUnionDBField		field[MAX_UNIONDB_COL_NUM];
+} TUnionDBRecord;
+typedef TUnionDBRecord   *PUnionDBRecord;
+
+static TUnionDBRecord		gunionDBRecord;
+*/
+
+static SQLHANDLE		g_stmt_handle = SQL_NULL_HSTMT;
+static SQLHANDLE		g_conn_handle = SQL_NULL_HDBC;
+static SQLHANDLE		g_env_handle = SQL_NULL_HENV;
+
+static SQLRETURN		g_sqlret = 0;
+
+int get_one_integer_value(void *arg ,int nCount,char** pValue,char** pName)
+{
+	int	*iCnt = (int *)arg;
+	if (nCount > 1)
+	{
+		UnionUserErrLog("in get_one_integer_value:: nCount[%d] > 1\n",nCount);
+		return(errCodeDatabaseMDL_MoreRecordFound);
+	}
+	*iCnt = atoi(pValue[0]);
+	return(*iCnt);
+}
+
+/*
+int UnionSetAutoCommit(int sw)
+{
+        int             ret;
+        if ((ret = UnionConnectDatabase()) < 0)
+        {
+                UnionUserErrLog("in UnionSetAutoCommit:: UnionConnectDatabase ret = [%d]\n",ret);
+                return(ret);
+        }
+        if(sw == 0)
+        {
+                SQLSetConnectAttr(g_conn_handle, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_OFF,SQL_IS_INTEGER);
+        }
+        else
+        {
+                SQLSetConnectAttr(g_conn_handle, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_ON,SQL_IS_INTEGER);
+        }
+        return(0);
+
+}
+*/
+static int getDiagRec(SQLSMALLINT htype, SQLHANDLE hndl)
+{
+	short		recnumber = 1; 
+	SQLCHAR		sqlstate[SQL_SQLSTATE_SIZE + 1]; 
+	SQLINTEGER	sqlcode = 0; 
+	SQLCHAR		buffer[SQL_MAX_MESSAGE_LENGTH + 1]; 
+	SQLRETURN	ret;
+
+	if ((g_sqlret == SQL_SUCCESS) || (g_sqlret == SQL_SUCCESS_WITH_INFO))
+		return(0);
+
+	while(1)
+	{
+		//调用函数SQLGetDiagRec诊断错误，并打印错误代码，类型等
+		ret = SQLGetDiagRec(htype, hndl, recnumber, sqlstate, &sqlcode, buffer, SQL_MAX_MESSAGE_LENGTH + 1, NULL); 
+		if (ret != SQL_SUCCESS)
+		{
+			if (ret != SQL_NO_DATA)
+				UnionUserErrLog("in getDiagRec:: SQLGetDiagRec ret = %d\n", ret);
+			break;
+		}
+		UnionUserErrLog("in getDiagRec:: SQLSTATE[%s], SQLCODE[%d], MESSAGE[%s]\n", sqlstate, (int)sqlcode, buffer);
+		UnionSetResponseRemark((char *)buffer);
+		recnumber += 1; 
+	}
+
+	return(0-abs(sqlcode));
+}
+
+static int getDBErrCode(SQLSMALLINT htype, SQLHANDLE hndl)
+{
+	int	ret;
+
+	if ((ret = getDiagRec(htype,hndl)) < 0)
+	{
+		// 设计数据库错误码偏移	
+		ret = ret + errCodeOffsetOfDB2;	
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+	return(0);
+}
+
+// 初始化句柄
+static int initAllocHandle()
+{
+	SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &g_env_handle);
+	if (g_env_handle != SQL_NULL_HENV)
+		SQLSetEnvAttr(g_env_handle, SQL_ATTR_ODBC_VERSION, (SQLPOINTER) SQL_OV_ODBC3, SQL_IS_UINTEGER);
+
+	if (g_env_handle != SQL_NULL_HENV)
+		SQLAllocHandle(SQL_HANDLE_DBC, g_env_handle, &g_conn_handle);
+
+	return(0);
+}
+
+// 释放句柄
+static int freeAllocHandle()
+{
+	if (g_conn_handle != SQL_NULL_HDBC)
+		SQLFreeHandle(SQL_HANDLE_DBC,g_conn_handle);
+
+	if(g_env_handle != SQL_NULL_HENV)
+		SQLFreeHandle(SQL_HANDLE_ENV,g_env_handle);
+
+	g_conn_handle = SQL_NULL_HDBC;
+	g_env_handle = SQL_NULL_HENV;
+
+	return(0);
+}
+
+int UnionIsFatalDBErrCode(int dbErrCode)
+{       
+	int	len;
+	char    varName[100];
+
+	len = sprintf(varName,"fatalDBErr%d",abs(dbErrCode));
+	varName[len] = 0;
+
+	if (UnionReadIntTypeRECVar(varName) > 0)
+		return(1); // 兼容旧版本
+
+	len = sprintf(varName,"fatalDB2DBErr%d",abs(dbErrCode));
+	varName[len] = 0;
+	if (UnionReadIntTypeRECVar(varName) > 0)
+		return(1);
+
+	return 0;
+}
+
+static int  freeStmtHandle()
+{
+	if (SQL_NULL_HSTMT == g_stmt_handle)
+		return 0;
+	/*
+	SQLSetStmtAttr(g_stmt_handle,SQL_ATTR_QUERY_TIMEOUT,(SQLPOINTER)-1,0);
+	SQLFreeStmt(g_stmt_handle,SQL_DROP);
+	*/
+	SQLFreeHandle(SQL_HANDLE_STMT, g_stmt_handle);
+	g_stmt_handle = SQL_NULL_HSTMT;
+	return 0;
+}
+
+static int createStmtHandle()
+{
+	int	ret = 0;
+
+	if (g_stmt_handle != SQL_NULL_HSTMT) 
+		return(0);
+
+	// if ((g_sqlret = SQLAllocStmt(g_conn_handle, &g_stmt_handle)) != SQL_SUCCESS)
+	g_sqlret = SQLAllocHandle(SQL_HANDLE_STMT, g_conn_handle, &g_stmt_handle);
+	if((g_sqlret != SQL_SUCCESS) && (g_sqlret != SQL_SUCCESS_WITH_INFO))
+	{
+		ret = getDBErrCode(SQL_HANDLE_STMT,g_stmt_handle);
+		UnionUserErrLog("in createStmtHandle:: can't alloc stmt handle!\n");
+		return(ret);
+	}
+
+	return(ret);
+}
+
+int UnionConnectDB()
+{
+	int	ret;
+
+	char	DBUserName[64];
+	char	DBPasswd[64];
+	char	DBname[64];
+	char	connStr[128];
+	long	beginTime = 0;
+    
+	memset(DBUserName, 0, sizeof(DBUserName));
+	memset(DBPasswd, 0, sizeof(DBPasswd));
+	memset(DBname, 0, sizeof(DBname));
+	UnionGetDBUSER(DBUserName);
+	UnionGetDBPASSWD(DBPasswd);
+	UnionGetDBNAME(DBname);
+	snprintf(connStr,sizeof(connStr),"dbalias=%s;uid=%s;pwd=%s;",DBname,DBUserName,DBPasswd);
+
+	beginTime = UnionGetCurrentTimeInMicroSeconds();
+	// 初始化句柄
+	initAllocHandle();
+	
+	// 设计数据库连接超时
+	SQLSetConnectAttr(g_conn_handle, SQL_LOGIN_TIMEOUT, (SQLPOINTER)5, 0);
+
+	// 连接数据库
+	// 20150917 zhangyd modify, 改为不通过配置文件
+	//g_sqlret = SQLConnect(g_conn_handle, DBname, SQL_NTS, DBUserName, SQL_NTS, DBPasswd, SQL_NTS);
+	g_sqlret = SQLDriverConnect(g_conn_handle, NULL, (SQLCHAR *)connStr, SQL_NTS, NULL, 0, NULL,SQL_DRIVER_NOPROMPT); 
+	if((g_sqlret != SQL_SUCCESS) && (g_sqlret != SQL_SUCCESS_WITH_INFO))
+	{
+		ret = getDBErrCode(SQL_HANDLE_DBC, g_conn_handle);
+		UnionUserErrLog("in UnionConnectDB:: DBname = [%s] DBUserName = [%s]\n",DBname,DBUserName);
+		UnionUserErrLog("in UnionConnectDB:: database g_sqlret = [%d]\n",g_sqlret);
+		UnionCloseDatabase();
+		return(ret);
+	}
+
+	// 设置连接句柄属性，自动提交功能
+	SQLSetConnectAttr(g_conn_handle, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_OFF,SQL_IS_INTEGER);
+
+	if ((ret = createStmtHandle()) < 0)
+	{
+		UnionUserErrLog("in UnionConnectDB:: createStmtHandle!\n");
+		UnionCloseDatabase();
+		return(ret);
+	}
+	UnionLog("in UnionConnectDB:: ret = %d use microSecond = [%ld]\n", ret, UnionGetCurrentTimeInMicroSeconds() - beginTime);
+	return(0);
+}
+
+int UnionCloseDB()
+{
+	long	beginTime = 0;
+
+	beginTime = UnionGetCurrentTimeInMicroSeconds();
+	//add by linxj 20150922 db timeout open
+	UnionSetIdleDBTime(-1);
+
+	SQLEndTran(SQL_HANDLE_DBC, g_conn_handle, SQL_ROLLBACK); // added 20150511//SQL_COMMIT
+	freeStmtHandle();
+	if (g_conn_handle != SQL_NULL_HDBC)
+		g_sqlret = SQLDisconnect(g_conn_handle);
+
+	if((g_sqlret != SQL_SUCCESS) && (g_sqlret != SQL_SUCCESS_WITH_INFO))
+	{
+		UnionUserErrLog("in UnionCloseDB:: database g_sqlret = [%d]\n",g_sqlret);
+		//add by linxj 20150922 db timeout close
+		UnionCloseIdleDBAlrm();
+		return(abs(g_sqlret) * -1);
+	}
+
+	freeAllocHandle();
+	UnionLog("in UnionCloseDB:: use microSecond = [%ld]\n", UnionGetCurrentTimeInMicroSeconds() - beginTime);
+
+	//add by linxj 20150922 db timeout close
+	UnionCloseIdleDBAlrm();
+
+	return(0);
+}
+
+static int execSQLStatement(const char* sql,select_callback callback,void *pArg)
+{
+	int	ret = 0, i;
+	char	colName[MAX_UNIONDB_COL_NUM][32];
+	char	*pcolName[MAX_UNIONDB_COL_NUM];
+	char    value[4096];
+	char 	tmpBuf[32];
+	char	*azCols[MAX_UNIONDB_COL_NUM];	  /* Names of result columns */
+
+	int			len;
+	SQLSMALLINT 		colNum = 0;
+	SQLSMALLINT		nameLength;				// pcbColName
+	SQLSMALLINT		fieldType[MAX_UNIONDB_COL_NUM];		// pfSqlType
+	SQLULEN 		fieldLen[MAX_UNIONDB_COL_NUM];		// pcbColDef
+	SQLSMALLINT		decimalDigits;				// pibScale
+	SQLSMALLINT		nullable;				// pfNullable
+	SQLINTEGER		realRowNum = 0;
+	SQLINTEGER		iValue = 0;
+	SQLDOUBLE		dValue = 0;
+
+	g_sqlret = SQLExecDirect(g_stmt_handle, (SQLCHAR*)sql, SQL_NTS);
+	if((g_sqlret != SQL_SUCCESS) && (g_sqlret != SQL_SUCCESS_WITH_INFO))
+	{
+		ret = getDBErrCode(SQL_HANDLE_STMT, g_stmt_handle);
+		UnionUserErrLog("in execSQLStatement:: SQLExecDirect sql=[%s] Error !\n", sql);
+		return(ret);
+	}
+
+	//获取结果集列数
+	g_sqlret = SQLNumResultCols(g_stmt_handle, &colNum);
+	if ((g_sqlret != SQL_SUCCESS) && (g_sqlret != SQL_SUCCESS_WITH_INFO))
+	{
+		if (g_sqlret != SQL_NO_DATA)
+		{
+			ret = getDBErrCode(SQL_HANDLE_STMT, g_stmt_handle);
+			UnionUserErrLog("in execSQLStatement:: SQLNumResultCols g_sqlret = %d, ret = %d\n", g_sqlret, ret);
+			return(ret);
+		}
+		else
+			return(0);
+	}
+
+	if(colNum > MAX_UNIONDB_COL_NUM)
+	{
+		UnionUserErrLog("in execSQLStatement:: colNum = %d > MAX_UNIONDB_COL_NUM %d!\n", colNum, MAX_UNIONDB_COL_NUM);
+		return(errCodeParameter);
+	}
+
+	for (i = 0; i < colNum; i++)
+	{
+		pcolName[i] = colName[i];
+		g_sqlret = SQLDescribeCol(g_stmt_handle,			// hstmt
+			i + 1,					// icol
+			(SQLCHAR*)colName[i],			// szColName
+			sizeof(colName[i]),			// cbColNameMax
+			&nameLength,				// pcbColName
+			&(fieldType[i]),				// pfSqlType
+			&(fieldLen[i]),				// pcbColDef
+			&decimalDigits,				// pibScale
+			&nullable);				// pfNullable
+
+		if((g_sqlret != SQL_SUCCESS) && (g_sqlret != SQL_SUCCESS_WITH_INFO))
+		{
+			ret = getDBErrCode(SQL_HANDLE_STMT, g_stmt_handle);
+			UnionUserErrLog("in execSQLStatement:: SQLDescribeCol g_sqlret = %d ret = %d\n", g_sqlret, ret);
+			return(ret);
+		}
+
+		colName[i][nameLength] = 0;
+		UnionToLowerCase(colName[i]);
+		
+
+		if(callback)
+		{
+			azCols[i] = (char *)calloc(1, (size_t)(fieldLen[i] + 1));
+			if(azCols[i] == NULL)
+			{
+				ret = -1;
+				UnionUserErrLog("in execSQLStatement:: azCols index = [%d] size [%d]= NULL!!!!\n", i, (int)(fieldLen[i] + 1));
+				goto exec_out;
+			}
+			//UnionLog("in execSQLStatement:: azCols index = [%d] size [%d] OK!!!!\n", i, (int)(fieldLen[i] + 1));
+		}
+
+	}
+
+	
+	if (!callback)
+	{
+		if ((ret = UnionInitXMLPackage(NULL,NULL,0)) < 0)
+		{
+			UnionUserErrLog("in execSQLStatement:: UnionInitXMLPackage\n");
+			return(ret);
+		}
+	
+		if ((ret = UnionSetXMLPackageValue("totalNum","0")) < 0)
+		{
+			UnionUserErrLog("in execSQLStatement:: UnionSetXMLPackageValue[%s][%s]\n","totalNum","0");
+			return(ret);
+		}
+	}
+
+	
+	while ((g_sqlret = SQLFetch(g_stmt_handle)) == SQL_SUCCESS)
+	{
+		if (!callback)
+			UnionLocateNewXMLPackage("detail", ++realRowNum);
+		else
+			++realRowNum;
+
+		for (i = 0; i < colNum; i++)
+		{
+				
+			switch(fieldType[i])
+			{
+				case SQL_C_DOUBLE:
+				case SQL_C_FLOAT:
+				case SQL_DECIMAL:
+					SQLGetData(g_stmt_handle, i+1, fieldType[i], &dValue, 0, (SQLINTEGER *)&len);
+					snprintf(value,sizeof(value),"%.2f", dValue);
+					break;
+				case SQL_C_LONG:
+				case SQL_C_SBIGINT:
+				case SQL_C_SHORT:
+				case SQL_C_TINYINT:
+				case SQL_C_UBIGINT:
+				case SQL_C_UTINYINT:
+				case SQL_C_NUMERIC:
+					SQLGetData(g_stmt_handle, i+1, fieldType[i], &iValue, 0, (SQLINTEGER *)&len);
+					if (len > 0)
+						snprintf(value,sizeof(value), "%d", (int)iValue);
+					else
+						snprintf(value,sizeof(value), "0");
+					break;
+				default:
+					//SQLGetData(g_stmt_handle, i+1, SQL_C_CHAR, &value, sizeof(value), (SQLINTEGER *)&len); // modify by linxj 20150216
+					SQLGetData(g_stmt_handle, i+1, SQL_C_CHAR, value, sizeof(value), (SQLINTEGER *)&len);
+
+					if(len < 0)
+						value[0] = 0;
+					else
+						value[len] = 0;
+
+					break;
+			}
+                        
+
+			if (callback)
+			{
+				if(azCols[i] == NULL)
+				{
+					ret = -1;
+					UnionUserErrLog("in execSQLStatement:: azCols[%d] = NULL.!\n", i);
+					goto exec_out;
+				}
+			
+				snprintf(azCols[i], (size_t)(fieldLen[i] + 1), "%s", value);
+				
+			}
+			else
+			{
+					UnionSetXMLPackageValue(colName[i], value);
+			}
+
+		}
+		
+		if (callback)
+		{
+			//UnionLog("in execSQLStatement:: callback realRowNum = [%d]!\n", (int)realRowNum);
+			if ((ret = callback(pArg, colNum, azCols, pcolName)) < 0)
+			{
+				UnionUserErrLog("in execSQLStatement:: callback ret = [%d]!\n",ret);
+				goto exec_out;
+			}
+		}
+
+	}
+
+
+	ret = realRowNum;
+
+	if (!callback)
+	{
+		len = sprintf(tmpBuf,"%d", (int)realRowNum);
+		tmpBuf[len] = 0;
+		UnionLocateXMLPackage("",0);
+		UnionSetXMLPackageValue("totalNum",tmpBuf);
+	}
+
+exec_out:
+	if(callback)
+	{
+		for (i = 0; i < colNum; i++)
+		{
+			if (azCols[i])
+			{
+				free(azCols[i]);
+				//UnionLog("in execSQLStatement:: azCols index = [%d] free [%d] OK!!!!\n", i, (int)(fieldLen[i] + 1));
+			}
+		}
+	}
+	return(ret);
+}
+
+int UnionSelectRealDBRecord2(char *sql,int currentPage,int numOfPerPage,select_callback callback,void *pArg)
+{
+	int     beginNum = 0;
+	int 	endNum = 0;
+	int	ret = -1;
+	char	dbSql[8192*2];
+	char	*sqlPtr = NULL;
+	int	reconnectTimes = 0;
+
+
+	if (sql == NULL)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecord2:: sql is null!\n");
+		return(errCodeParameter);
+	}
+
+onceAgain:
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecord2:: UnionConnectDatabase ret = [%d]\n",ret);
+		return(ret);
+	}
+
+	//add by linxj 20150922 db timeout open
+	UnionSetIdleDBTime(-1);
+
+	if ((currentPage <= 0) || (numOfPerPage <= 0))
+		sqlPtr = sql;
+	else
+	{
+		beginNum = (currentPage - 1) * numOfPerPage + 1;
+		endNum = beginNum + numOfPerPage - 1;
+
+		snprintf(dbSql,sizeof(dbSql), "select * from (select a.*, row_number() over() as row_num from (%s) as a) as b where b.row_num >= %d and b.row_num <=%d", sql, beginNum, endNum);
+		sqlPtr = dbSql;
+	}
+
+	UnionProgramerLog("in UnionSelectRealDBRecord2:: sql = [%s]!\n",sqlPtr);
+
+
+	//执行sql语句
+	if ((ret = execSQLStatement(sqlPtr,callback,pArg)) < 0)
+	{
+		UnionCloseDatabase();
+		if (!reconnectTimes)
+		{
+			reconnectTimes ++;
+			goto onceAgain;
+		}
+		else
+		{
+			UnionUserErrLog("in UnionSelectRealDBRecord2:: execSQLStatement!\n");
+			//return(ret);
+		}
+	}
+
+	// 关闭游标
+	SQLCloseCursor(g_stmt_handle);
+
+	//add by linxj 20150922 db timeout close
+	UnionCloseIdleDBAlrm();
+
+	return(ret);
+}
+
+int UnionSelectRealDBRecord(char *sql,int currentPage,int numOfPerPage)
+{
+	int	ret = 0;
+	long	beginTime = 0;
+
+	beginTime = UnionGetCurrentTimeInMicroSeconds();
+	ret = UnionSelectRealDBRecord2(sql,currentPage,numOfPerPage,NULL,NULL);
+	UnionLog("in UnionSelectRealDBRecord:: ret = %d use microSecond = [%ld]\n", ret, UnionGetCurrentTimeInMicroSeconds() - beginTime);
+
+	return(ret);
+}
+
+int UnionSelectRealDBRecordCounts(char *tableName,char *joinCondition,char *condition)
+{
+	char	tmpBuf[32];
+	int     ret = 0;
+	char    sql[8192];
+	int 	len = 0;
+	//int	counts = 0;
+
+	if (tableName == NULL)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: tableName is NULL!\n");
+		return(errCodeParameter);
+	}
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	len = snprintf(sql,sizeof(sql),"select count(1) as counts from %s",tableName);
+
+	if ((joinCondition != NULL) && (strlen(joinCondition) > 0))
+		len += snprintf(sql + len,sizeof(sql) - len," %s",joinCondition);
+
+	if ((condition != NULL) && (strlen(condition) > 0))
+		len += snprintf(sql + len,sizeof(sql) - len," where %s",condition);
+
+	sql[len] = 0;
+	//UnionProgramerLog("in UnionSelectRealDBRecordCounts:: sql=[%s]\n",sql);
+
+	//if ((ret = UnionSelectRealDBRecord2(sql, 0, 0, get_one_integer_value,&counts)) < 0)
+	if ((ret = UnionSelectRealDBRecord2(sql, 0, 0, NULL,NULL)) < 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: UnionSelectRealDBRecord2  ret = %d\n", ret);
+		return(ret);
+	}
+	//return(counts);
+	
+	
+	UnionLocateXMLPackage("detail", 1);
+	if ((ret = UnionReadXMLPackageValue("counts", tmpBuf, sizeof(tmpBuf))) < 0)	
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts::  UnionReadXMLPackageValue[count(1)]\n");
+		return(ret);
+	}
+	tmpBuf[ret] = 0;
+
+	return atoi(tmpBuf);
+}
+
+int UnionExecRealDBSql2(int syncFlag,char* sql)
+{
+	int		ret = 0; 
+	int		len = 0;    
+	SQLINTEGER	realRowNum = 0;
+	char		dbSql[8192*2];
+	char		*sqlPtr = NULL;
+	int		reconnectTimes = 0;
+
+
+	if (sql == NULL)
+	{
+		UnionUserErrLog("in UnionExecRealDBSql2:: sql is null!\n");
+		return(errCodeParameter);
+	}
+
+onceAgain:
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionExecRealDBSql2:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	//add by linxj 20150922 db timeout open
+	UnionSetIdleDBTime(-1);
+
+	len = strlen(sql);
+	if (sql[len-1] == ';')	// 匿名块，多条sql语句
+	{
+		snprintf(dbSql,sizeof(dbSql),"begin atomic %s end;",sql);
+		sqlPtr = dbSql;
+	}
+	else
+		sqlPtr = sql;
+
+	UnionProgramerLog("in UnionExecRealDBSql2:: sql = [%s]\n", sqlPtr);
+
+	do
+	{ 
+		g_sqlret = SQLExecDirect(g_stmt_handle, (SQLCHAR*)sqlPtr, SQL_NTS);
+		if ((g_sqlret != SQL_SUCCESS) && (g_sqlret != SQL_SUCCESS_WITH_INFO))
+		{
+			if (g_sqlret != SQL_NO_DATA)
+			{
+				ret = getDBErrCode(SQL_HANDLE_STMT, g_stmt_handle);
+				UnionUserErrLog("in  UnionExecRealDBSql2:: SQLExecute g_sqlret = %d\n", g_sqlret);
+			}
+			goto out_flag;
+		}
+
+		g_sqlret = SQLRowCount(g_stmt_handle, (SQLLEN*)&realRowNum);
+		if ((g_sqlret != SQL_SUCCESS) && (g_sqlret != SQL_SUCCESS_WITH_INFO))
+		{
+			ret = getDBErrCode(SQL_HANDLE_STMT, g_stmt_handle);
+			UnionUserErrLog("in UnionExecRealDBSql2:: SQLRowCount g_sqlret = %d, ret = %d\n", g_sqlret, ret);
+			goto out_flag;
+		}
+
+		ret = realRowNum;
+	}
+	while(0);
+	
+out_flag:
+	if (ret < 0)
+	{
+		SQLEndTran (SQL_HANDLE_DBC, g_env_handle, SQL_ROLLBACK);
+		UnionCloseDatabase();
+		if (!reconnectTimes)
+		{
+			reconnectTimes ++;
+			goto onceAgain;
+		}
+	}
+	else
+	{
+		SQLEndTran (SQL_HANDLE_DBC, g_env_handle, SQL_COMMIT);
+	}
+
+	//add by linxj 20150922 db timeout close
+	UnionCloseIdleDBAlrm();
+
+	return(ret);
+}
+
+int UnionExecRealDBSql(char *sql)
+{
+	int	ret = 0;
+	long	beginTime = 0;
+
+	beginTime = UnionGetCurrentTimeInMicroSeconds();
+	ret = UnionExecRealDBSql2(1,sql);
+	UnionLog("in UnionExecRealDBSql:: ret = %d use microSecond = [%ld]\n", ret, UnionGetCurrentTimeInMicroSeconds() - beginTime);
+
+	return(ret);
+}
+
+int UnionGetAddSelfNumBySequence(char *sequenceName)
+{
+	int     ret = 0;
+	int	sequence = 0;
+	char	sql[1024];
+	char	tmpBuf[32];
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionGetAddSelfNumBySequence:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	snprintf(sql,sizeof(sql), "VALUES NEXT VALUE for %s", sequenceName);
+	
+	//UnionProgramerLog("in UnionGetAddSelfNumBySequence:: sql=[%s]\n", sql);
+
+	//if ((ret = UnionSelectRealDBRecord2(sql, 0, 0, get_one_integer_value,&sequence)) < 0)
+	if ((ret = UnionSelectRealDBRecord(sql, 0, 0)) < 0)
+	{
+		UnionUserErrLog("in UnionGetAddSelfNumBySequence:: UnionSelectRealDBRecord2  ret = %d\n", ret);
+		return(ret);
+	}
+	if (sequence == 999999)
+	{
+		snprintf(sql,sizeof(sql),"alter sequence %s restart with 1 increment by 1 maxvalue 999999",sequenceName);	
+		if ((ret =  UnionExecRealDBSql2(0,sql)) < 0)
+		{
+			UnionUserErrLog("in UnionGetAddSelfNumBySequence:: UnionExecRealDBSql2 ret = %d !\n", ret);
+			return(ret);
+		}
+	}
+	//return(sequence);
+
+	UnionLocateXMLPackage("detail", 1);
+	if ((ret = UnionReadXMLPackageValue("1", tmpBuf, sizeof(tmpBuf))) < 0)	
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts::  UnionReadXMLPackageValue[1]\n");
+		return(ret);
+	}
+	tmpBuf[ret] = 0;
+	return atoi(tmpBuf);
+}
+
+int UnionSelectRealDBTree(int returnSql,char *tableName,char *fieldName,char *parentFieldName,int fieldType,char *rootValue,char *buf,int sizeOfBuf)
+{
+	int	i;
+	int	ret;
+	int	num;
+	int	len;
+	char	sql[1024];
+	char	tmpBuf[128];
+	
+	if (fieldType == 1)	// 字符串
+		snprintf(tmpBuf,sizeof(tmpBuf),"'%s'",rootValue);
+	else
+		snprintf(tmpBuf,sizeof(tmpBuf),"%s",rootValue);
+	
+	snprintf(sql,sizeof(sql),"with tmp(%s) as "
+		"( select %s from %s where %s = %s"
+		" union all"
+		" select %s.%s from %s,tmp where tmp.%s = %s.%s)"
+		" select %s from tmp",
+		fieldName,fieldName,tableName,fieldName,tmpBuf,tableName,fieldName,tableName,fieldName,tableName,parentFieldName,fieldName);
+
+	if (returnSql)
+	{
+		ret = snprintf(buf,sizeOfBuf,"%s",sql);
+		return(ret);
+	}
+
+	if ((num = UnionSelectRealDBRecord(sql,0,0)) < 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBTree:: UnionSelectRealDBRecord,sql = [%s] ret = [%d] !\n",sql,num);
+		return(num);
+	}
+	else if (num == 0)
+	{
+		buf[0] = 0;
+		return(0);
+	}
+	
+	len = 0;
+	for (i = 1; i <= num; i++)
+	{
+		if ((ret = UnionLocateXMLPackage("detail",i)) < 0)
+		{
+			UnionUserErrLog("in UnionSelectRealDBTree:: UnionLocateXMLPackage[%s][%d]!\n","detail",i);
+			return(ret);
+		}
+		if ((ret = UnionReadXMLPackageValue(fieldName,tmpBuf,sizeof(tmpBuf))) < 0)
+		{
+			UnionUserErrLog("in UnionSelectRealDBTree:: UnionReadXMLPackageValue[%s][%d]!\n",fieldName,i);
+			return(ret);
+		}
+		if (fieldType == 1)	// 字符串
+		{
+			if (i < num)
+				len += snprintf(buf + len,sizeOfBuf - len,"'%s',",tmpBuf);
+			else
+				len += snprintf(buf + len,sizeOfBuf - len,"'%s'",tmpBuf);
+		}
+		else
+		{
+			if (i < num)
+				len += snprintf(buf + len,sizeOfBuf - len,"%s,",tmpBuf);
+			else
+				len += snprintf(buf + len,sizeOfBuf - len,"%s",tmpBuf);
+		}
+	}
+	return(len);
+}
+
+int UnionDeleteRealDBTree(char *tableName,char *fieldName,char *parentFieldName,int fieldType,char *rootValue)
+{
+	int	ret;
+	char	sql[10240];
+	char	condition[8192];
+	
+	if ((ret = UnionSelectRealDBTree(0,tableName,fieldName,parentFieldName,fieldType,rootValue,condition,sizeof(condition))) < 0)
+	{
+		UnionUserErrLog("in UnionDeleteRealDBTree:: UnionSelectRealDBTree!\n");
+		return(ret);
+	}
+
+	snprintf(sql,sizeof(sql),"delete from %s where %s in (%s)",
+		tableName,fieldName,condition);
+	
+	if ((ret = UnionExecRealDBSql(sql)) < 0)
+	{
+		UnionUserErrLog("in UnionDeleteRealDBTree:: UnionExecRealDBSql!\n");
+		return(ret);
+	}
+	return(ret);
+}

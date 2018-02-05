@@ -1,0 +1,70 @@
+20020731170149:: Debug::PID = [12428]
+8583 attribute::
+[0]	[0]	[6]
+[1]	[0]	[14]
+[2]	[0]	[11]
+[3]	[0]	[40]
+[4]	[0]	[4]
+[5]	[4]	[9999]
+
+20020731170149:: Debug::PID = [12428]
+in UnionInitEmu8583Attribute:: Field total number = [6]
+
+20020731170149:: Debug::PID = [12428]
+Before pack Emu8583
+i = 000 buf = *1010*
+i = 001 buf = *20010117100700*
+i = 002 buf = *00000000001*
+i = 003 buf = *1234567812345678123456781234567812345678*
+i = 004 buf = *0000*
+
+Pack OK!
+20020731170149:: Debug::PID = [12428]
+Pack Emu8583 successfully! Pack buffer length=[69]
+
+DateAndTime = [20020731170149] PID = [12428]
+Pack buffer:
+Displacement -1--2--3--4--5--6--7--8-Hex-0--1--2--3--4--5--6  --ASCII Value--
+00000(00000) 32 30 30 31 30 31 31 37 31 30 30 37 30 30 30 30  2001011710070000
+00016(00010) 30 30 30 30 30 30 30 30 31 31 32 33 34 35 36 37  0000000011234567
+00032(00020) 38 31 32 33 34 35 36 37 38 31 32 33 34 35 36 37  8123456781234567
+00048(00030) 38 31 32 33 34 35 36 37 38 31 32 33 34 35 36 37  8123456781234567
+00064(00040) 38 30 30 30 30                                   80000
+
+20020731170149:: Debug::PID = [12428]
+Field of send buffer:
+Field [0]: length = [004] buffer = [1010]
+Field [1]: length = [014] buffer = [20010117100700]
+Field [2]: length = [011] buffer = [00000000001]
+Field [3]: length = [040] buffer = [1234567812345678123456781234567812345678]
+Field [4]: length = [004] buffer = [0000]
+Field [5]: length = [000] buffer = []
+
+20020731170149:: Debug::PID = [12428]
+After unpack 8583:
+i = 001 buf = *20010117100700*
+i = 002 buf = *00000000001*
+i = 003 buf = *1234567812345678123456781234567812345678*
+i = 004 buf = *0000*
+
+20020731170149:: Debug::PID = [12428]
+Unpack Emu8583 successfully! return=[0]
+
+20020731170149:: Debug::PID = [12428]
+Field of receive buffer:
+Field [0]: length = [000] buffer = []
+Field [1]: length = [014] buffer = [20010117100700]
+Field [2]: length = [011] buffer = [00000000001]
+Field [3]: length = [040] buffer = [1234567812345678123456781234567812345678]
+Field [4]: length = [004] buffer = [0000]
+Field [5]: length = [000] buffer = []
+
+20020731170149:: Debug::PID = [12428]
+Field of receive buffer:
+Field [0]: length = [006] buffer = [101010]
+Field [1]: length = [014] buffer = [20010117100705]
+Field [2]: length = [011] buffer = [00000000002]
+Field [3]: length = [040] buffer = [8765432187654321876543218765432187654321]
+Field [4]: length = [004] buffer = [0001]
+Field [5]: length = [015] buffer = [UserDefineData1]
+

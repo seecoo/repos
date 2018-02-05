@@ -1,0 +1,1099 @@
+/*
+	Author: HuangBaoxin
+	Date: 2009/02/11
+	Description: define function for operating with database(oracle)
+*/
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+
+/*
+sqlca.h ：定义了sqlca结构，用于与SQL语句交互
+sqlda.h ：在使用Oracle动态SQL方法四的时候用
+oci.h ：当编写LOB应用、对象类型应用、集合类型应用时，必须包含该结构
+sql2oci.h ：定义了与oci交互的sqllib函数，当嵌入OCI函数时用。
+*/
+#include <sqlca.h>
+#include <sqlda.h>
+#include <oci.h>
+#include <sql2oci.h>
+
+#define _UnionDesKeyDB_2_x_
+
+#ifndef _UnionDesKey_3_x_
+#define _UnionDesKey_3_x_
+#endif
+
+#ifndef _UnionDesKey_4_x_
+#define _UnionDesKey_4_x_
+#endif
+
+#include "unionDesKey.h"
+#include "unionDesKeyDB.h"
+#include "unionDesKeyDBLog.h"
+#include "unionErrCode.h"
+#include "unionDesKeyDB.useOracle.h"
+#include "UnionLog.h"
+
+EXEC SQL INCLUDE ORACA;
+
+
+extern PUnionDesKeyDB	pgunionDesKeyDB;
+extern PUnionDesKey	pgunionDesKey;
+
+int gunionInitDBSuccess = 0;
+int gunionHasBeenLogon = 0;
+
+EXEC SQL BEGIN DECLARE SECTION;
+	char gunionDBUserName[64];
+	char gunionDBPasswd[64];
+	char gunionDBname[64];
+EXEC SQL END DECLARE SECTION;
+
+EXEC SQL BEGIN DECLARE SECTION;
+	char g_Fullname[41];
+	char g_Value[49]; 
+	char g_Checkvalue[17];
+	int  g_Length;
+	int  g_Type;
+	char g_Activedate[9];
+	long g_Maxeffectivedays;
+	long g_Maxusetimes;
+	long g_Usetimes;
+	long g_Lastupdatetime;
+	char g_Container[21];
+	short g_Oldvereffective;
+	char g_Oldvalue[49];
+	char g_Oldcheckvalue[17];
+	int  g_Windowbetweenkeyver;
+	short g_Iswritinglocked;
+EXEC SQL END DECLARE SECTION;
+
+/*
+	函数功能：
+		删除空格
+	输入参数：
+		str: 字符串
+	输出参数：
+		str: 字符串
+	函数返回：
+*/
+void DeleteSpace(char *str)
+{
+        char *p_head, *p_find, *p_tmp;
+        p_head = str;
+        p_find = str;
+
+        while ((p_find != NULL) && (*p_find != 0))
+        {
+                if (*p_find == ' ')
+                {
+                        p_tmp = p_find;
+                        p_find++;
+                        *p_tmp = 0;
+                        strcat(p_head, p_find);
+                        p_find = p_head;
+                }
+                else
+                        p_find++;
+        }
+        
+        return;
+}
+	
+/*
+	函数功能：
+		设置数据库用户和密码
+	输入参数：无
+	输出参数：无
+	函数返回：0
+*/
+int UnionInitDBOnOracle()
+{
+	char	*p;
+
+	if (gunionInitDBSuccess) return 0;
+		
+	memset(gunionDBUserName, 0, sizeof(gunionDBUserName));
+	memset(gunionDBPasswd, 0, sizeof(gunionDBPasswd));
+	memset(gunionDBname, 0, sizeof(gunionDBname));
+	
+	//strcpy(gunionDBUserName, "uniondeskey");
+	//strcpy(gunionDBPasswd, "uniondeskey");
+	//strcpy(gunionDBname, "ora10g");
+
+	if ((p = getenv("UNION_DBUSER")) == NULL)	
+	{
+		UnionUserErrLog("in UnionInitDBOnOracle::getenv(UNION_DBUSER) null\n");
+		return -1;
+	}
+	else
+		strcpy(gunionDBUserName, p);
+
+	if ((p = getenv("UNION_DBPASSWD")) == NULL)	
+	{
+		UnionUserErrLog("in UnionInitDBOnOracle::getenv(UNION_DBPASSWD) null\n");
+		return -1;
+	}
+	else
+		strcpy(gunionDBPasswd, p);
+
+	if ((p = getenv("UNION_DBNAME")) == NULL)	
+	{
+		UnionUserErrLog("in UnionInitDBOnOracle::getenv(UNION_DBNAME) null\n");
+		return -1;
+	}
+	else
+		strcpy(gunionDBname, p);
+
+	gunionInitDBSuccess = 1;
+	
+	return 0;
+}
+
+/*
+	函数功能：
+		连接数据库
+	输入参数：
+		timeout：超时(秒)，>=0超时时间，<0不设置超时
+	输出参数：无
+	函数返回：
+		0成功，<0失败
+*/
+int UnionConnectDBOnOracle(int timeout)
+{
+	int seconds = 0;
+   	
+   	if (gunionHasBeenLogon) return 0;
+   		
+   	if (UnionInitDBOnOracle() < 0)
+   		return -1;
+   	
+	while (1){
+		EXEC SQL CONNECT :gunionDBUserName IDENTIFIED BY :gunionDBPasswd USING :gunionDBname;
+		if (sqlca.sqlcode != 0){
+			UnionUserErrLog("in UnionConnectToOracle::error connect to[%s] using[%s][%s],sqlcode=[%d]\n",
+				gunionDBname, gunionDBUserName, gunionDBPasswd, sqlca.sqlcode);
+			UnionLogErrMsgOnOracle();
+     			if ((timeout >= 0) && (seconds < timeout))
+     			{
+     				seconds++;
+     				sleep(1);
+     			}
+     			else if ((timeout >= 0) && (seconds >= timeout))
+     				break;
+     			else
+     				sleep(1);;
+     		}
+     		else {
+     			gunionHasBeenLogon = 1;
+     			return 0;
+     		}
+	}
+	
+	return sqlca.sqlcode;	
+}
+
+/*
+	函数功能：
+		提交事务，断开连接
+	输入参数：无
+	输出参数：无
+	函数返回：sqlcode
+*/
+int UnionCommitAndDisconnectOnOracle()
+{
+	gunionHasBeenLogon = 0;
+	EXEC SQL COMMIT WORK RELEASE;
+	if (sqlca.sqlcode != 0)
+	{
+		UnionUserErrLog("in UnionDisConnectToOracle::sqlcode=[%d]\n", sqlca.sqlcode);	
+	}
+	return sqlca.sqlcode;	
+}
+
+/*
+	函数功能：
+		记录数据库错误信息日志
+	输入参数：
+	输出参数：
+	函数返回：
+*/
+void UnionLogErrMsgOnOracle()
+{
+	char msg_buf[256+1];
+	int buf_size, meg_len;
+	
+	buf_size = sizeof(msg_buf);
+	memset(msg_buf, 0, sizeof(msg_buf));
+	
+	sqlglm(msg_buf, &buf_size, &meg_len);
+	UnionSystemErrLog("in UnionLogErrMsgOnOracle::ora err msg is \n%s\n", msg_buf);
+	return;
+}
+
+/*
+	函数功能：
+		回滚事务，断开连接
+	输入参数：无
+	输出参数：无
+	函数返回：sqlcode
+*/
+int UnionRollbackAndDisconnectOnOracle()
+{
+	gunionHasBeenLogon = 0;
+	EXEC SQL ROLLBACK WORK RELEASE;
+	if (sqlca.sqlcode != 0)
+	{
+		UnionUserErrLog("in UnionRollbackAndDisconnectOnOracle::sqlcode=[%d]\n", sqlca.sqlcode);	
+	}
+	return sqlca.sqlcode;	
+}
+
+/*
+	函数功能：
+		deskey初始化全局变量
+	输入参数：
+	输出参数：
+	函数返回：
+*/
+void UnionInitDesKeyGlobalVar()
+{
+	memset(g_Fullname, 0, sizeof(g_Fullname));
+	memset(g_Value, 0, sizeof(g_Value));
+	memset(g_Checkvalue, 0, sizeof(g_Checkvalue));
+	g_Length = 0;
+	g_Type = 0;
+	memset(g_Activedate, 0, sizeof(g_Activedate));
+	g_Maxeffectivedays = 0;
+	g_Maxusetimes = 0;
+	g_Usetimes = 0;
+	g_Lastupdatetime = 0;
+	memset(g_Container, 0, sizeof(g_Container));
+	g_Oldvereffective = 0;
+	memset(g_Oldvalue, 0, sizeof(g_Oldvalue));
+	memset(g_Oldcheckvalue, 0, sizeof(g_Oldcheckvalue));
+	g_Windowbetweenkeyver = 0;
+	g_Iswritinglocked = 0;
+	return;
+}
+
+/*
+	函数功能：
+		打印deskey全局变量
+	输入参数：
+	输出参数：
+	函数返回：	
+*/
+void UnionLogDesKeyGlobalVar()
+{
+	UnionAuditLog("\n%s,%s,%s,%d\n%d,%s,%ld,%ld,\n%ld,%ld,%s,%d,\n%s,%s,%d,%d\n",
+		g_Fullname, g_Value, g_Checkvalue, g_Length, g_Type, g_Activedate,
+		g_Maxeffectivedays, g_Maxusetimes, g_Usetimes, g_Lastupdatetime,
+		g_Container, g_Oldvereffective, g_Oldvalue, g_Oldcheckvalue,
+		g_Windowbetweenkeyver, g_Iswritinglocked);
+	return;
+}
+
+/*
+	函数功能：
+		deskey给全局变量赋值
+	输入参数：
+	输出参数：
+	函数返回：
+*/
+void UnionSetDesKeyGlobalVar(PUnionDesKey pkey)
+{
+	UnionInitDesKeyGlobalVar();
+	
+	strcpy(g_Fullname, pkey->fullName);
+	strcpy(g_Value, pkey->value);
+	strcpy(g_Checkvalue, pkey->checkValue);
+	g_Length = pkey->length;
+	g_Type = pkey->type;
+	strcpy(g_Activedate, pkey->activeDate);
+	g_Maxeffectivedays = pkey->maxEffectiveDays;
+	g_Maxusetimes = pkey->maxUseTimes;
+	g_Usetimes = pkey->useTimes;
+	g_Lastupdatetime = pkey->lastUpdateTime;
+	strcpy(g_Container, pkey->container);
+	g_Oldvereffective = pkey->oldVerEffective;
+	strcpy(g_Oldvalue, pkey->oldValue);
+	strcpy(g_Oldcheckvalue, pkey->oldCheckValue);
+	g_Windowbetweenkeyver = pkey->windowBetweenKeyVer;
+	g_Iswritinglocked = pkey->isWritingLocked;
+	return;
+}
+
+/*
+	函数功能：
+		全局变量给deskey赋值
+	输入参数：
+	输出参数：
+	函数返回：
+*/
+void UnionSetGlobalVarToDesKey(PUnionDesKey pkey)
+{
+	strcpy(pkey->fullName, g_Fullname);
+	strcpy(pkey->value, g_Value);
+	strcpy(pkey->checkValue, g_Checkvalue);
+	pkey->length = g_Length;
+	pkey->type = g_Type;
+	strcpy(pkey->activeDate, g_Activedate);
+	pkey->maxEffectiveDays = g_Maxeffectivedays;
+	pkey->maxUseTimes = g_Maxusetimes;
+	pkey->useTimes = g_Usetimes;
+	pkey->lastUpdateTime = g_Lastupdatetime;
+	strcpy(pkey->container, g_Container);
+	pkey->oldVerEffective = g_Oldvereffective;
+	strcpy(pkey->oldValue, g_Oldvalue);
+	strcpy(pkey->oldCheckValue, g_Oldcheckvalue);
+	pkey->windowBetweenKeyVer = g_Windowbetweenkeyver;
+	pkey->isWritingLocked = g_Iswritinglocked;
+	return;
+}
+
+/*
+	函数功能：
+		插入密钥库
+	输入参数：
+		pkey：密钥定义
+	输出参数：无
+	函数返回：
+		=0成功，<0失败
+*/
+int UnionInsertDesKeyOnOracle(PUnionDesKey pkey)
+{
+	int ret;
+	
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	UnionSetDesKeyGlobalVar(pkey);
+	
+	EXEC SQL INSERT INTO UnionDesKeyDB(
+		fullname,value,checkvalue,length
+		,type,activedate,maxeffectivedays,maxusetimes
+		,usetimes,lastupdatetime,container,oldvereffective
+		,oldvalue,oldcheckvalue,windowbetweenkeyver,iswritinglocked)
+	    VALUES(
+		:g_Fullname,:g_Value,:g_Checkvalue,:g_Length
+		,:g_Type,:g_Activedate,:g_Maxeffectivedays,:g_Maxusetimes
+		,:g_Usetimes,:g_Lastupdatetime,:g_Container,:g_Oldvereffective
+		,:g_Oldvalue,:g_Oldcheckvalue,:g_Windowbetweenkeyver,:g_Iswritinglocked
+		);
+	
+	if (sqlca.sqlcode < 0)
+	{
+		ret = sqlca.sqlcode;
+		UnionUserErrLog("in UnionInsertDesKeyOnOracle:: insert UnionDesKeyDB error, sqlcode=[%d]\n", sqlca.sqlcode);
+		UnionLogDesKeyGlobalVar();
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		//UnionRollbackAndDisconnectOnOracle();
+		return ret;	
+	}
+	
+	EXEC SQL COMMIT WORK;
+	
+	return 0;
+}
+
+/*
+	函数功能：
+		更新密钥
+	输入参数：
+		pkey：密钥定义
+	输出参数：
+	函数返回：
+		>0成功，=0未找到记录，<0失败
+*/
+int UnionUpdateDesKeyOnOracle(PUnionDesKey pkey)
+{
+	int ret;
+
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	UnionSetDesKeyGlobalVar(pkey);
+	
+	EXEC SQL UPDATE UnionDesKeyDB SET
+		value = :g_Value, checkvalue = :g_Checkvalue, length = :g_Length
+		,type = :g_Type, activedate = :g_Activedate, maxeffectivedays = :g_Maxeffectivedays
+		,maxusetimes = :g_Maxusetimes, usetimes = :g_Usetimes, lastupdatetime = :g_Lastupdatetime
+		,container = :g_Container, oldvereffective = :g_Oldvereffective, oldvalue = :g_Oldvalue
+		,oldcheckvalue = :g_Oldcheckvalue, windowbetweenkeyver = :g_Windowbetweenkeyver
+		,iswritinglocked = :g_Iswritinglocked
+	    WHERE Fullname = :g_Fullname;
+	
+	if (sqlca.sqlcode < 0)
+	{
+		ret = sqlca.sqlcode;
+		UnionUserErrLog("in UnionUpdateDesKeyOnOracle:: update UnionDesKeyDB error, sqlcode=[%d]\n",
+			sqlca.sqlcode);
+		UnionLogDesKeyGlobalVar();
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		//UnionRollbackAndDisconnectOnOracle();
+		return ret;	
+	}	   
+		
+	if ((sqlca.sqlcode == 100) || (sqlca.sqlcode == 1403))
+	{
+		UnionUserErrLog("in UnionUpdateDesKeyOnOracle:: no date updated,sqlcode=[%d]\n", sqlca.sqlcode);
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		return 0;
+	}
+			
+	EXEC SQL COMMIT WORK;
+	
+	return 1;	
+}
+
+/*
+	函数功能：
+		删除密钥
+	输入参数：
+		pkey：密钥定义
+	输出参数：
+	函数返回：
+		>0成功，=0未找到记录，<0失败	
+*/
+int UnionDeleteDesKeyOnOracle(char *fullName)
+{	
+	int ret;
+	
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	memset(g_Fullname, 0, sizeof(g_Fullname));
+	memcpy(g_Fullname, fullName, sizeof(g_Fullname)-1);
+	
+	EXEC SQL DELETE FROM UnionDesKeyDB
+		WHERE fullname = :g_Fullname;
+	
+	if (sqlca.sqlcode < 0)
+	{
+		ret = sqlca.sqlcode;
+		UnionUserErrLog("in UnionDeleteDesKeyOnOracle:: del UnionDesKeyDB error, sqlcode=[%d]\n",
+			sqlca.sqlcode);
+		UnionLogErrMsgOnOracle();
+		EXEC SQL COMMIT WORK;
+		return ret;
+	}
+	
+	if ((sqlca.sqlcode == 100) || (sqlca.sqlcode == 1403))
+	{
+		UnionUserErrLog("in UnionDeleteDesKeyOnOracle:: no data deleted, sqlcode=[%d]\n",
+			sqlca.sqlcode);
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		return 0;				
+	}
+	
+	EXEC SQL COMMIT WORK;
+			
+	return 1;	
+}
+
+/*
+	函数功能：
+		查询参数值
+	输入参数：
+		paramName：参数名
+		sizeOfValue: 参数paramValue的大小
+	输出参数：
+		paramValue:参数值
+	函数返回：
+		>0输出参数的长度，=0未查询到数据，<0失败		
+*/
+int UnionGetParamValueOnOracle(char *paramName, char *paramValue, int sizeOfValue)
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		char *p_name;
+		char v_value[256+1];
+	EXEC SQL END DECLARE SECTION;
+	int	ret;
+	
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	memset(v_value, 0, sizeof(v_value));
+	p_name = paramName;
+	
+	EXEC SQL SELECT pvalue INTO :v_value FROM UnionDesKeyParam
+		WHERE pname = :p_name;
+	
+	if (sqlca.sqlcode < 0 && sqlca.sqlcode != -1405)
+	{
+		UnionUserErrLog("in UnionGetParamValueOnOracle:: sel UnionDesKeyParam Error, sqlcode=[%d]\n", sqlca.sqlcode);
+		UnionLogErrMsgOnOracle();
+		return sqlca.sqlcode;	
+	}
+	
+	if ((sqlca.sqlcode == 100) || (sqlca.sqlcode == 1403))
+	{
+		UnionLog("in UnionGetParamValueOnOracle:: select UnionDesKeyParam,pname=[%s], no data found\n", p_name);
+		return 0;	
+	}
+	
+	DeleteSpace(v_value);
+		
+	if ((strlen(v_value)+1) > sizeOfValue)
+	{
+		UnionUserErrLog("in UnionGetParamValueOnOracle::strlen(v_value)+1=[%d] > sizeOfValue=[%d]\n value=[%s]",
+			strlen(v_value)+1, sizeOfValue, v_value);
+		return(errCodeParameter);	
+	}
+
+	strcpy(paramValue, v_value);
+	paramValue[sizeOfValue-1] = '\0';
+	return strlen(paramValue);
+}
+
+/*
+	函数功能：
+		插入参数值
+	输入参数：
+		paramName：参数名
+		paramValue: 参数值
+		paramRemark: 备注
+	输出参数：
+	函数返回：
+		=0成功，<0失败		
+*/
+int UnionInsertParamValueOnOracle(char *paramName, char *paramValue, char *paramRemark)
+{
+	int ret;
+	
+	EXEC SQL BEGIN DECLARE SECTION;
+		char *p_paramName, *p_paramValue, *p_paramRemark;
+	EXEC SQL END DECLARE SECTION;
+	
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	p_paramName = paramName;
+	p_paramValue = paramValue;
+	p_paramRemark = paramRemark;
+	
+	EXEC SQL INSERT INTO UnionDesKeyParam(pname, pvalue, premark)
+		VALUES(:p_paramName, :p_paramValue, :p_paramRemark);
+	
+	if (sqlca.sqlcode < 0)
+	{
+		ret = sqlca.sqlcode;
+		UnionUserErrLog("in UnionInsertParamValueOnOracle:: ins UnionDesKeyParam err,(%s,%s,%s)\n",
+			p_paramName, p_paramValue, p_paramRemark);
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		return ret;	
+	}
+	
+	EXEC SQL COMMIT WORK;
+	
+	return 0;
+}
+
+/*
+	函数功能：
+		更新参数值
+	输入参数：
+		paramName：参数名
+		paramValue: 参数值
+		paramRemark: 备注
+	输出参数：
+	函数返回：
+		>0成功，=0未找到记录，<0失败		
+*/
+int UnionUpdateUnionParamOnOracle(char *paramName, char *paramValue, char *paramRemark)
+{
+	int ret;
+	
+	EXEC SQL BEGIN DECLARE SECTION;
+		char *p_paramName, *p_paramValue, *p_paramRemark;
+	EXEC SQL END DECLARE SECTION;
+	
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	p_paramName = paramName;
+	p_paramValue = paramValue;
+	p_paramRemark = paramRemark;
+	
+	if ((p_paramValue == NULL) && (p_paramRemark == NULL))
+	{
+		UnionUserErrLog("in UnionUpdateUnionParamOnOracle::paramValue and paramRemark is NULL\n");
+		return(errCodeParameter);
+	}
+	
+	if ((p_paramValue != NULL) && (p_paramRemark == NULL))
+		EXEC SQL UPDATE UnionDesKeyParam SET pvalue = :p_paramValue 
+			WHERE pname = :p_paramName;
+	else if ((p_paramValue == NULL) && (p_paramRemark != NULL))
+		EXEC SQL UPDATE UnionDesKeyParam SET premark = :p_paramRemark 
+			WHERE pname = :p_paramName;
+	else
+		EXEC SQL UPDATE UnionDesKeyParam SET pvalue = :p_paramValue, premark = :p_paramRemark 
+			WHERE pname = :p_paramName;
+				
+	if ((ret = sqlca.sqlcode) < 0)
+	{
+		UnionUserErrLog("in UnionUpdateUnionParamOnOracle:: update UnionDesKeyParam err,sqlcode[%d]\n", sqlca.sqlcode);
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		return ret;
+	}
+	
+	if ((sqlca.sqlcode == 100) || (sqlca.sqlcode == 1403))
+	{
+		UnionUserErrLog("in UnionUpdateUnionParamOnOracle:: no data updated, sqlcode[%d]\n", sqlca.sqlcode);
+		EXEC SQL ROLLBACK WORK;
+		return 0;
+	}
+	
+	EXEC SQL COMMIT WORK;
+			
+	return 1;			
+}
+
+/*
+	函数功能：
+		从密钥库查询所有密钥，保存在共享内存区
+	输入参数：
+	输出参数：
+	函数返回：
+		=0成功，<0失败	
+*/
+int UnionLoadDesKeyDBIntoMemoryOnOracle()
+{
+	int ret;
+	int v_deskey_count;
+	
+	EXEC SQL BEGIN DECLARE SECTION;
+		char v_tmpbuf[256];
+	EXEC SQL END DECLARE SECTION;
+	
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	if ((ret = UnionWritingLockDesKeyTBL()) < 0)
+	{
+		UnionUserErrLog("in UnionLoadDesKeyDBIntoMemoryOnOracle:: UnionWritingLockDesKeyTBL!\n");
+		return(ret);
+	}
+	
+	memset(v_tmpbuf, 0, sizeof(v_tmpbuf));
+	if ((ret = UnionGetParamValueOnOracle("MAXKEYNUM", v_tmpbuf, sizeof(v_tmpbuf))) <= 0)
+	{
+		UnionUserErrLog("in UnionLoadDesKeyDBIntoMemoryOnOracle::UnionGetParamValueOnOracle error\n");
+		UnionWritingUnlockDesKeyTBL();
+		return ret;
+	}
+	pgunionDesKeyDB->maxKeyNum = atol(v_tmpbuf);
+	
+	if ((ret = UnionUpdateNumFromKeyDBOnOracle()) < 0)
+	{
+		UnionUserErrLog("in UnionLoadDesKeyDBIntoMemoryOnOracle::UnionUpdateNumFromKeyDBOnOracle error\n");
+		UnionWritingUnlockDesKeyTBL();
+		return ret;	
+	}
+	
+	memset(v_tmpbuf, 0, sizeof(v_tmpbuf));
+	if ((ret = UnionGetParamValueOnOracle("LASTUPDATEDTIME", v_tmpbuf, sizeof(v_tmpbuf))) <= 0)
+	{
+		UnionUserErrLog("in UnionLoadDesKeyDBIntoMemoryOnOracle::UnionGetParamValueOnOracle error\n");
+		UnionWritingUnlockDesKeyTBL();
+		return ret;
+	}
+	memcpy(pgunionDesKeyDB->lastUpdatedTime, v_tmpbuf, 14);
+	pgunionDesKeyDB->lastUpdatedTime[14] = 0;
+	
+	memset(v_tmpbuf, 0, sizeof(v_tmpbuf));
+	if ((ret = UnionGetParamValueOnOracle("NUM", v_tmpbuf, sizeof(v_tmpbuf))) <= 0)
+	{
+		UnionUserErrLog("in UnionLoadDesKeyDBIntoMemoryOnOracle::UnionGetParamValueOnOracle error\n");
+		UnionWritingUnlockDesKeyTBL();
+		return ret;
+	}
+	pgunionDesKeyDB->num = atol(v_tmpbuf);
+
+	if (pgunionDesKeyDB->num > pgunionDesKeyDB->maxKeyNum)
+	{
+		pgunionDesKeyDB->num = pgunionDesKeyDB->maxKeyNum;
+	}
+	
+	EXEC SQL DECLARE uniondeskey_cur CURSOR FOR SELECT
+		fullname,value,checkvalue,length
+		,type,activedate,maxeffectivedays,maxusetimes
+		,usetimes,lastupdatetime,container,oldvereffective
+		,oldvalue,oldcheckvalue,windowbetweenkeyver,iswritinglocked
+		FROM uniondeskeydb ORDER BY fullname;
+		
+	EXEC SQL OPEN uniondeskey_cur;
+	if (sqlca.sqlcode < 0)
+	{
+		UnionUserErrLog("in UnionLoadDesKeyDBIntoMemoryOnOracle:: open cursor err");
+		UnionLogErrMsgOnOracle();
+		UnionWritingUnlockDesKeyTBL();
+		return sqlca.sqlcode;
+	}	
+	v_deskey_count = 0;
+
+	while(1) {
+		UnionInitDesKeyGlobalVar();
+		
+		EXEC SQL FETCH uniondeskey_cur INTO
+			:g_Fullname,:g_Value,:g_Checkvalue,:g_Length
+			,:g_Type,:g_Activedate,:g_Maxeffectivedays,:g_Maxusetimes
+			,:g_Usetimes,:g_Lastupdatetime,:g_Container,:g_Oldvereffective
+			,:g_Oldvalue,:g_Oldcheckvalue,:g_Windowbetweenkeyver,:g_Iswritinglocked;
+		if (sqlca.sqlcode < 0 && sqlca.sqlcode != -1405)
+		{
+			UnionUserErrLog("in UnionLoadDesKeyDBIntoMemoryOnOracle:: fetch cursor err");
+			UnionLogErrMsgOnOracle();
+			UnionWritingUnlockDesKeyTBL();
+			return sqlca.sqlcode;			
+		}
+		if ((sqlca.sqlcode == 100) || (sqlca.sqlcode == 1403)) break;
+		
+		v_deskey_count++;
+		if (v_deskey_count > pgunionDesKeyDB->num) break;
+		
+		DeleteSpace(g_Fullname);
+		DeleteSpace(g_Value);
+		DeleteSpace(g_Checkvalue);
+		DeleteSpace(g_Activedate);
+		DeleteSpace(g_Container);
+		DeleteSpace(g_Oldvalue);
+		DeleteSpace(g_Oldcheckvalue);
+			
+		UnionSetGlobalVarToDesKey(pgunionDesKey+v_deskey_count-1);
+		(pgunionDesKey+v_deskey_count-1)->isWritingLocked = 0;
+	}
+	UnionNullLog("in UnionLoadDesKeyDBIntoMemoryOnOracle::pgunionDesKeyDB->num=[%d][%d]\n",
+		pgunionDesKeyDB->num, v_deskey_count);
+	EXEC SQL CLOSE uniondeskey_cur;
+	
+	UnionWritingUnlockDesKeyTBL();
+	return 0;	
+}
+
+/*
+	函数功能：
+		获取maxKeyNum
+	输入参数：
+	输出参数：
+	函数返回：
+		>0成功返回maxKeyNum，<0失败	
+*/
+long UnionGetMaxKeyNumFromKeyDBOnOracle()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		char v_tmpbuf[256];
+	EXEC SQL END DECLARE SECTION;
+	long	maxKeyNum;
+	int	ret;
+	
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	memset(v_tmpbuf, 0, sizeof(v_tmpbuf));
+	if ((ret = UnionGetParamValueOnOracle("MAXKEYNUM", v_tmpbuf, sizeof(v_tmpbuf))) < 0)
+	{
+		UnionUserErrLog("in UnionGetMaxKeyNumFromKeyDBOnOracle::UnionGetParamValueOnOracle error\n");
+		return ret;
+	}
+	else if (ret == 0)
+	{
+		UnionUserErrLog("in UnionGetMaxKeyNumFromKeyDBOnOracle::UnionGetParamValueOnOracle error\n");
+		return -1;
+	}		
+	
+	UnionLog("in UnionGetMaxKeyNumFromKeyDBOnOracle::v_tmpbuf=[%s]\n", v_tmpbuf);
+	
+	maxKeyNum = atol(v_tmpbuf);
+	
+	return maxKeyNum;	
+}
+
+/*
+	函数功能：
+		获取num
+	输入参数：
+	输出参数：
+	函数返回：
+		>0成功返回num，<=0失败	
+*/
+long UnionGetNumFromKeyDBOnOracle()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		char v_tmpbuf[256];
+	EXEC SQL END DECLARE SECTION;
+	long	num;
+	int	ret;
+
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	memset(v_tmpbuf, 0, sizeof(v_tmpbuf));
+	if ((ret = UnionGetParamValueOnOracle("NUM", v_tmpbuf, sizeof(v_tmpbuf))) <= 0)
+	{
+		UnionUserErrLog("in UnionGetNumFromKeyDBOnOracle::UnionGetParamValueOnOracle error\n");
+		return ret;
+	}
+	
+	num = atol(v_tmpbuf);
+	
+	return num;	
+}
+
+/*
+	函数功能：
+		更新num
+	输入参数：
+	输出参数：
+	函数返回：
+		=0成功，<0失败	
+*/
+int UnionUpdateNumFromKeyDBOnOracle()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		char	s_tmpbuf[20];
+	EXEC SQL END DECLARE SECTION;
+	int	ret;
+	
+	memset(s_tmpbuf, 0, sizeof(s_tmpbuf));
+	EXEC SQL SELECT to_char(count(*)) INTO :s_tmpbuf FROM uniondeskeydb;
+	
+	if ((ret = sqlca.sqlcode) < 0)
+	{
+		UnionUserErrLog("in UnionUpdateNumFromKeyDBOnOracle:: sel uniondeskeydb err");
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		return ret;			
+	}
+	
+	ret = UnionUpdateUnionParamOnOracle("NUM", s_tmpbuf, "number of deskey");
+	if (ret <= 0)
+		return -1;
+	
+	return 0;
+}
+
+/*
+	函数功能：
+		获取LASTUPDATEDTIME
+	输入参数：
+	输出参数：
+	函数返回：
+		char* 指针，NULL失败	
+*/
+char g_tmpbuf[256];
+char *UnionGetDesKeyDBLastUpdatedTimeOnOracle()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		char v_tmpbuf[256];
+	EXEC SQL END DECLARE SECTION;
+	int	ret;
+
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(NULL);
+	}
+		
+	memset(v_tmpbuf, 0, sizeof(v_tmpbuf));
+	memset(g_tmpbuf, 0, sizeof(g_tmpbuf));
+	if ((ret = UnionGetParamValueOnOracle("LASTUPDATEDTIME", v_tmpbuf, sizeof(v_tmpbuf))) <= 0)
+	{
+		UnionUserErrLog("in UnionGetDesKeyDBLastUpdatedTimeOnOracle::UnionGetParamValueOnOracle error\n");
+		return NULL;
+	}
+	strcpy(g_tmpbuf, v_tmpbuf);
+	
+	return g_tmpbuf;
+}
+
+/*
+	函数功能：
+		创建密钥库
+		创建UnionDesKeyParam表和UnionDesKeyDB表,并插入参数MAXKEYNUM、NUM和LASTUPDATEDTIME
+	输入参数：
+	输出参数：
+	函数返回：
+		=0成功，<0失败	
+*/
+int UnionCreateDesKeyDBOnOracle(PUnionDesKeyDB pDesKeyDB)
+{
+	int 	ret;
+	char 	v_tmpbuf[256];
+
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	EXEC SQL CREATE TABLE UnionDesKeyParam(
+		PName	varchar2(128),
+		PValue	varchar2(256),
+		PRemark	varchar2(256));
+	if ((ret = sqlca.sqlcode) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: create UnionDesKeyParam err");
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		return ret;			
+	}
+	
+	EXEC SQL CREATE UNIQUE INDEX idx_uniondeskeyparam ON UnionDesKeyParam(PName);
+	if ((ret = sqlca.sqlcode) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: create idx_uniondeskeyparam err");
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		return ret;			
+	}
+	
+	EXEC SQL CREATE TABLE UnionDesKeyDB(
+		fullName	varchar2(41),
+		value		varchar2(49),
+		checkValue	varchar2(17),
+		length		number(2),
+		type		number(2),
+		activeDate	varchar2(9),
+		maxEffectiveDays	number(12),
+		maxUseTimes		number(12),
+		useTimes		number(12),
+		lastUpdateTime		number(12),
+		container	varchar(21),
+		oldVerEffective	number(2),
+		oldValue	varchar(49),
+		oldCheckValue	varchar(17),
+		windowBetweenKeyVer	number(8),
+		isWritingLocked		number(2));
+	if ((ret = sqlca.sqlcode) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: create UnionDesKeyDB err");
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		return ret;			
+	}
+	
+	EXEC SQL CREATE UNIQUE INDEX idx_uniondeskeydb ON UnionDesKeyDB(fullName);		
+	if ((ret = sqlca.sqlcode) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: create idx_uniondeskeydb err");
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		return ret;			
+	}
+	
+	EXEC SQL COMMIT WORK;
+	
+	memset(v_tmpbuf, 0, sizeof(v_tmpbuf));
+	sprintf(v_tmpbuf, "%ld", pDesKeyDB->maxKeyNum);
+	ret = UnionInsertParamValueOnOracle("MAXKEYNUM", v_tmpbuf, "最大的密钥数量");
+	if (ret < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionInsertParamValueOnOracle\n");
+		return ret;
+	}
+	
+	memset(v_tmpbuf, 0, sizeof(v_tmpbuf));
+	sprintf(v_tmpbuf, "%ld", pDesKeyDB->num);
+	ret = UnionInsertParamValueOnOracle("NUM", v_tmpbuf, "密钥数量");
+	if (ret < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionInsertParamValueOnOracle\n");
+		return ret;
+	}
+	
+	ret = UnionInsertParamValueOnOracle("LASTUPDATEDTIME", pDesKeyDB->lastUpdatedTime, "最近更新时间");
+	if (ret < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionInsertParamValueOnOracle\n");
+		return ret;
+	}
+	
+	return 0;
+}
+
+/*
+	函数功能：
+		删除UnionDesKeyParam表和UnionDesKeyDB表
+	输入参数：
+	输出参数：
+	函数返回：
+		=0成功，<0失败	
+*/
+int UnionDeleteDesKeyDBOnOracle()
+{
+	int ret;
+
+	if ((ret = UnionConnectDBOnOracle(3)) < 0)
+	{
+		UnionUserErrLog("in UnionCreateDesKeyDBOnOracle:: UnionConnectDBOnOracle!\n");
+		return(ret);
+	}
+		
+	EXEC SQL DROP TABLE UnionDesKeyParam;
+	if ((ret = sqlca.sqlcode) < 0)
+	{
+		UnionUserErrLog("in UnionDeleteDesKeyDBOnOracle:: drop UnionDesKeyParam err");
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		return ret;			
+	}
+	
+	EXEC SQL DROP TABLE UnionDesKeyDB;
+	if ((ret = sqlca.sqlcode) < 0)
+	{
+		UnionUserErrLog("in UnionDeleteDesKeyDBOnOracle:: drop UnionDesKeyDB err");
+		UnionLogErrMsgOnOracle();
+		EXEC SQL ROLLBACK WORK;
+		return ret;			
+	}
+	
+	EXEC SQL COMMIT WORK;
+	
+	return 0;		
+}

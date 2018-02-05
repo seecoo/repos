@@ -1,0 +1,4 @@
+HOMEDIR=$HOME/unionCopyFiles
+
+cp $HOMEDIR/bin.x/mkSetup.x $UNIONLIBDIR/tools
+cp $HOMEDIR/bin.x/mkSetup.x $UNIONLIBDIR/binLibs

@@ -1,0 +1,9 @@
+dllName=null.dll
+
+funName=ConnectHsmSJL05|hsmIPAddr=192.1.2.202|hsmPort=16141|
+
+funName=ExcuteHsmSJL05Cmd|hsmCmdReqStr=4E43|
+hsmCmdResStr,0,2,
+
+funName=CloseHsmSJL05
+

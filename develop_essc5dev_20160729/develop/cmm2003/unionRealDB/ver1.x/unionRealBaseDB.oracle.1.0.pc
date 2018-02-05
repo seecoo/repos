@@ -1,0 +1,1581 @@
+/*	
+Author:	zhangyongding
+Date:	20081223
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <setjmp.h>
+
+#include "unionErrCode.h"
+#include "UnionLog.h"
+#include "UnionStr.h"
+
+#include "unionRealBaseDB.h"
+#include "unionTblDef.h"
+#include "unionTableDef.h"
+
+#define SQL_SINGLE_RCTX 255
+
+/* 列的最大数目或宿主变量的最大个数*/
+#define MAX_ITEMS	 100
+/* 列名的最大长度或指示符的最大长度*/
+#define MAX_VNAME_LEN     100
+#define MAX_INAME_LEN     100
+
+#define SQLNOTFOUND	1403
+
+EXEC SQL include sqlca;
+EXEC SQL include sqlda;
+
+SQLDA *bind_dp;
+SQLDA *select_dp;
+
+extern SQLDA *SQLSQLDAAlloc(int,int,int,int);
+extern void sqlnul();
+
+jmp_buf jmp_continue;
+
+EXEC SQL WHENEVER NOT FOUND CONTINUE ;
+EXEC SQL WHENEVER SQLWARNING CONTINUE ;
+EXEC SQL WHENEVER SQLERROR CONTINUE ;
+
+/*
+int	alloc_descriptors();
+int	set_bind_variables();
+int	process_select_list();
+int	free_select_list();
+*/
+
+int UnionGetDBErrCode()
+{
+	int			ret;
+
+	ret = 0 - abs(sqlca.sqlcode);
+	
+	// 设计数据库错误码偏移
+	// ret = ret + oracleErrCodeOffset .......
+
+	return(UnionSetUserDefinedErrorCode(ret));
+}
+
+int UnionIsFatalDBErrCode(int dbErrCode)
+{
+	int	ret;
+	char	varName[100];
+
+	memset(varName, 0, sizeof varName);
+
+	sprintf(varName, "fatalORACLEDBErr%d", abs(dbErrCode));
+	if (UnionReadIntTypeRECVar(varName) > 0)
+	{
+		return(1);
+	}
+
+	return 0;
+}
+
+/*
+函数功能：
+连接数据库
+输入参数：
+timeout：超时(秒)，>=0超时时间，<0不设置超时
+输出参数：无
+函数返回：
+0成功，<0失败
+*/
+int UnionConnectDatabaseWithTimeOut(int timeout)
+{
+	int				     ret;
+	int				     seconds;
+
+	ret		     =	       0;
+	seconds		 =	       0;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	DBUserName[64];
+	char	DBPasswd[64];
+	char	DBname[64];
+	EXEC SQL END DECLARE SECTION;
+	
+	memset(DBUserName, 0, sizeof(DBUserName));
+	memset(DBPasswd, 0, sizeof(DBPasswd));
+	memset(DBname, 0, sizeof(DBname));
+	UnionGetDBUSER(DBUserName);
+	UnionGetDBPASSWD(DBPasswd);
+	UnionGetDBNAME(DBname);
+
+	while (1){
+		EXEC SQL CONNECT :DBUserName IDENTIFIED BY :DBPasswd USING :DBname;
+		if ((ret = (0 - abs(sqlca.sqlcode))) < 0)
+		{
+			ret = UnionGetDBErrCode();
+			UnionUserErrLog("in UnionConnectDatabaseWithTimeOut:: DBname = [%s] DBUserName = [%s]\n",DBname,DBUserName);
+			UnionUserErrLog("in UnionConnectDatabaseWithTimeOut:: database sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+			if ((timeout >= 0) && (seconds < timeout))
+			{
+				seconds++;
+				sleep(1);
+			}
+			else if ((timeout >= 0) && (seconds >= timeout))
+				break;
+			else
+				sleep(1);
+		}
+		else {
+			return(0);
+		}
+	}
+
+	return(ret);
+}
+
+int UnionConnectDB()
+{
+	int	ret;
+	
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	DBUserName[64];
+	char	DBPasswd[64];
+	char	DBname[64];
+	EXEC SQL END DECLARE SECTION;
+	
+	memset(DBUserName, 0, sizeof(DBUserName));
+	memset(DBPasswd, 0, sizeof(DBPasswd));
+	memset(DBname, 0, sizeof(DBname));
+	UnionGetDBUSER(DBUserName);
+	UnionGetDBPASSWD(DBPasswd);
+	UnionGetDBNAME(DBname);
+
+	if(strlen(DBname) == 0)
+	{
+		EXEC SQL CONNECT :DBUserName IDENTIFIED BY :DBPasswd;
+	}
+	else
+	{
+		EXEC SQL CONNECT :DBUserName IDENTIFIED BY :DBPasswd USING :DBname;	
+	}
+
+	if(sqlca.sqlcode)
+	{
+		if (sqlca.sqlcode == 28002)	//the password will expire within %s days
+		{
+			UnionLog("in UnionConnectDB:: Waring database sqlca.sqlcode = [%d] [the password will expire within %%s days]\n", sqlca.sqlcode);
+			return(0);
+		}
+		else
+		{
+			ret = UnionGetDBErrCode();
+			UnionUserErrLog("in UnionConnectDB:: DBname = [%s] DBUserName = [%s]\n",DBname,DBUserName);
+			UnionUserErrLog("in UnionConnectDB:: database sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+			return(ret);
+		}
+	}
+
+	UnionLog("in UnionConnectDB:: connect DB OK!\n");
+	return(0);
+}
+
+int UnionConnectBackupDB()
+{
+	int	ret;
+	
+	/*声明宿主变量*/
+	EXEC SQL BEGIN DECLARE SECTION;
+
+	char	db_usr[128+1];
+	char	db_pass[128+1];
+	char	db_name[128+1];
+
+	EXEC SQL END DECLARE SECTION;
+		
+	/* 设置连接备份数据库的用户名、密码 */
+	memset(db_usr,0,sizeof(db_usr));
+	strcpy(db_usr,getenv("BACKUPDBUSER"));
+	memset(db_pass,0,sizeof(db_pass));
+	strcpy(db_pass,getenv("BACKUPDBPASSWD"));
+	memset(db_name,0,sizeof(db_name));
+	strcpy(db_name,getenv("BACKUPDBNAME"));
+
+	// modified 2012-06-20
+	// EXEC SQL CONNECT :db_usr IDENTIFIED BY :db_pass USING :db_name;	
+	if(strlen(db_name) == 0)
+	{
+		EXEC SQL CONNECT :db_usr IDENTIFIED BY :db_pass;
+	}
+	else
+	{
+		EXEC SQL CONNECT :db_usr IDENTIFIED BY :db_pass USING :db_name;	
+	}
+	// end of modification 2012-06-20
+
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		// modified 2012-06-19
+		if (ret == -28002)	//the password will expire within %s days
+		{
+			UnionLog("in UnionConnectBackupDB:: Waring database sqlca.sqlcode = [%d] [the password will expire within %%s days]\n", sqlca.sqlcode);
+			return(0);
+		}
+		else
+		{
+			ret = UnionGetDBErrCode();
+			UnionUserErrLog("in UnionConnectDatabase:: db_usr[%s] db_pass[%s]\n",db_usr,db_pass);
+			UnionUserErrLog("in UnionConnectDatabase:: database sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+			UnionUserErrLog("in UnionConnectDatabase:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+			return(ret);
+		}
+		// end of modification 2012-06-19
+	}
+	
+	return(0);
+}
+
+int UnionCloseDB()
+{
+	int	ret;
+
+	EXEC SQL ROLLBACK WORK RELEASE;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionCloseDB:: EXEC SQL ROLLBACK WORK RELEASE sqlca.sqlcode = [%d]\n", sqlca.sqlcode);
+		return(ret);
+	}
+
+	UnionLog("in UnionCloseDB:: close DB OK!\n");
+	
+	return(0);
+}
+
+
+int UnionCloseBackupDB()
+{
+	int	ret;
+
+	EXEC SQL ROLLBACK WORK RELEASE;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionCloseDatabase:: EXEC SQL ROLLBACK WORK RELEASE sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionCloseDatabase:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		//return(0);
+	}
+
+	return(0);
+}
+
+// 回滚事务
+int UnionRollBackWork()
+{
+	int	ret;
+
+	EXEC SQL ROLLBACK WORK;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionRollBackWork:: EXEC SQL ROLLBACK WORK sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+	}
+
+	UnionLog("in UnionRollBackWork:: rollback work OK!\n");
+	
+	return(0);
+}
+
+int UnionSelectRealDBRecord(char *tableName,char *field,char *condition,char *record,int sizeOfRecord,char *fileName)
+{
+	int     numOfPerPage=0,currPage=0,isUseNewMech=1;
+	int     beginNum=0,endNum=0;
+	char    tmpStr[20+1];
+	int	i;
+	int	ret;
+	FILE	*fp = NULL;
+	
+	char	*fieldPtr = NULL;
+	char	tableFileList[1024];
+	char	primaryList[256];
+	
+	memset(tmpStr, 0, sizeof tmpStr);
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	int	count;
+	char	sql[8192+1];
+	EXEC SQL END DECLARE SECTION;
+	
+	UnionAuditLog("in UnionSelectRealDBRecord::begin[%s][%s][%s]\n", tableName, field, condition);
+	
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecord:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	if ((ret = alloc_descriptors(MAX_ITEMS, MAX_VNAME_LEN, MAX_INAME_LEN)) != 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecord:: alloc_descriptors!\n");
+		UnionCloseDatabase();
+		return(ret);
+	}
+	UnionDebugLog("in UnionSelectRealDBRecord::======0=======condition=[%s]!\n", condition);
+	
+	// add by xusj begin, 2009-07-27
+	memset(tmpStr, 0, sizeof tmpStr);
+	if (UnionReadRecFldFromRecStr(condition,strlen(condition),"currentPage",tmpStr,sizeof(tmpStr)) < 0)
+	{
+		isUseNewMech=0;
+	}
+	else
+	{
+		currPage = atoi(tmpStr);
+	}
+	memset(tmpStr, 0, sizeof tmpStr);
+	if (UnionReadRecFldFromRecStr(condition,strlen(condition),"numOfPerPage",tmpStr,sizeof(tmpStr)) < 0)
+	{
+		isUseNewMech=0;
+	}
+	else
+	{
+		numOfPerPage = atoi(tmpStr);
+	}
+	UnionDebugLog("in UnionSelectRealDBRecord::======1=======condition=[%s]!\n", condition);
+	if (isUseNewMech)
+	{
+		UnionDeleteRecFldFromRecStr(condition,"currentPage");
+		UnionDebugLog("in UnionSelectRealDBRecord::====2=========condition=[%s]!\n", condition);
+		UnionDeleteRecFldFromRecStr(condition,"numOfPerPage");
+		UnionDebugLog("in UnionSelectRealDBRecord::====3=========condition=[%s]!\n", condition);
+
+		beginNum = (currPage-1)*numOfPerPage+1;
+		endNum = beginNum + numOfPerPage-1;
+
+		memset(sql, 0, sizeof sql);
+		if ((condition == NULL) || (strlen(condition) == 0))
+			sprintf(sql,"select count(1) from %s",tableName);
+		else
+			sprintf(sql,"select count(1) from %s where %s",tableName, condition);
+
+		UnionDebugLog("in UnionSelectRealDBRecord::=============sql=[%s]!\n", sql);
+
+		EXEC SQL PREPARE S FROM :sql;
+		EXEC SQL DECLARE CUR_S CURSOR FOR S;
+		EXEC SQL OPEN CUR_S;
+		EXEC SQL FETCH CUR_S INTO :count;
+		EXEC SQL CLOSE CUR_S;
+		if (sqlca.sqlcode != 0)
+		{
+			ret = UnionGetDBErrCode();
+			UnionUserErrLog("in UnionSelectRealDBRecord:: sql=[%s],errcode=[%d]!\n", sql, sqlca.sqlcode);
+			free_select_list();
+			UnionCloseDatabase();
+			return(ret);
+		}
+
+		if ( count == 0)
+		{
+			UnionLog("in UnionSelectRealDBRecord::count is 0\n");
+			free_select_list();
+			if (fileName != NULL)
+			{
+				if ((fp = fopen(fileName,"w")) == NULL)
+				{
+					UnionUserErrLog("in UnionSelectRealDBRecord:: fopen file [%s]!\n", fileName);
+					ret = UnionSetUserDefinedErrorCode(errCodeUseOSErrCode);
+					return(ret);
+				}
+			}
+			fclose(fp);
+			return(0);
+		}
+	}
+
+	memset(sql,0,sizeof(sql));
+	if (isUseNewMech)
+	{
+		if ((condition == NULL) || (strlen(condition) == 0))
+		{
+			if (strcmp(field, "*") != 0)
+				sprintf(sql,"select %s from (select %s,rownum r from (select %s from %s",field,field,field,tableName);
+			else
+				sprintf(sql,"select %s from (select a.%s,rownum r from (select * from %s",field,field,tableName);
+		}
+		else
+		{
+			if (strcmp(field, "*") != 0)
+				sprintf(sql,"select %s from (select %s,rownum r from (select %s from %s where %s",
+					field,field,field,tableName,condition);
+			else
+				sprintf(sql,"select %s from (select a.%s,rownum r from (select * from %s where %s",
+					field,field,tableName,condition);
+		}
+		if ((fileName != NULL) && (strlen(fileName) != 0))
+		{
+			if (strstr(sql,"order by") == NULL)
+			{
+				memset(primaryList, 0, sizeof(primaryList));
+				if (UnionFormTablePrimaryKeyList(tableName, primaryList) > 0)
+				{
+					sprintf(sql + strlen(sql), " order by %s", primaryList);
+				}
+			}
+		}
+		sprintf(sql, "%s) a  where rownum<=%d) where r>=%d ", sql, endNum, beginNum);
+		
+	}
+	else
+	{
+		fieldPtr = field;
+		if (strcmp(fieldPtr, "*") == 0)
+		{
+			memset(tableFileList, 0, sizeof(tableFileList));
+			UnionFormTableFieldList(tableName, tableFileList);
+			if(strlen(tableFileList) > 0)
+			{
+				fieldPtr = tableFileList;
+			}
+		}
+		if ((condition == NULL) || (strlen(condition) == 0))
+			sprintf(sql,"select %s from %s", fieldPtr, tableName);
+		else
+			sprintf(sql,"select %s from %s where %s",fieldPtr, tableName, condition);
+	}
+	
+	
+	if (!isUseNewMech)
+	{
+		if ((fileName != NULL) && (strlen(fileName) != 0))
+		{
+			if (strstr(sql,"order by") == NULL)
+			{
+				memset(primaryList, 0, sizeof(primaryList));
+				if (UnionFormTablePrimaryKeyList(tableName, primaryList) > 0)
+				{
+					sprintf(sql + strlen(sql), " order by %s", primaryList);
+				}
+			}
+		}
+	}
+
+	UnionProgramerLog("in UnionSelectRealDBRecord:: sql=[%s]!\n",sql);
+
+	/* 对该SQL语句做PREPARE操作 */
+	EXEC SQL prepare selct_id from :sql;
+	if (sqlca.sqlcode)
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionSelectRealDBRecord:: select sql = [%s]\n",sql);
+		UnionUserErrLog("in UnionSelectRealDBRecord:: prepare sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionSelectRealDBRecord:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		free_select_list();
+		UnionCloseDatabase();
+		return(ret);
+	}
+	/*声明游标*/
+	EXEC SQL DECLARE Curs CURSOR FOR selct_id;
+ 	if (sqlca.sqlcode)
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionSelectRealDBRecord:: select sql = [%s]\n",sql);
+		UnionUserErrLog("in UnionSelectRealDBRecord:: DECLARE CURSOR sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionSelectRealDBRecord:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		free_select_list();
+		UnionCloseDatabase();
+		return(ret);
+	}
+	/* 提示用户输入参数值*/
+	set_bind_variables();
+	/* 打开游标 */
+	EXEC SQL OPEN Curs USING DESCRIPTOR bind_dp;
+ 	if (sqlca.sqlcode)
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionSelectRealDBRecord:: select sql = [%s]\n",sql);
+		UnionUserErrLog("in UnionSelectRealDBRecord:: OPEN CURSOR sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionSelectRealDBRecord:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		free_select_list();
+		UnionCloseDatabase();
+		return(ret);
+	}
+
+	/* 处理语句，并输出结果*/
+	if ((ret = process_select_list(tableName,record,sizeOfRecord,fileName,isUseNewMech,beginNum, endNum, count)) < 0)
+	{
+		EXEC SQL CLOSE Curs;
+		free_select_list();
+		if ((ret == errCodeDatabaseMDL_RecordNotFound) && (fileName != NULL))
+		{
+			UnionProgramerLog("in UnionSelectRealDBRecord::no data found from [%s]!\n",tableName);
+			return(0);
+		}
+		if (ret == errCodeDatabaseMDL_RecordNotFound)
+		{
+			UnionAuditLog("in UnionSelectRealDBRecord:: select not record found!!\n",sql);
+			return(0);
+		}
+		UnionUserErrLog("in UnionSelectRealDBRecord:: select sql = [%s]\n",sql);
+		UnionCloseDatabase();
+		return(ret);
+	}
+	EXEC SQL CLOSE Curs;
+	free_select_list();
+	
+	return(ret);
+
+}
+
+int UnionSelectRealDBRecordCounts(char *tableName,char *condition)
+{
+	char    tmpStr[20+1];
+	int     i;
+	int     ret;
+	int     sqlLen;
+	FILE    *fp;
+
+	memset(tmpStr, 0, sizeof tmpStr);
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	int	count = 0;
+	char    sql[8192+1];
+	EXEC SQL END DECLARE SECTION;
+
+	//UnionCloseDatabase();
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	memset(sql, 0, sizeof(sql));
+	if ((condition == NULL) || (strlen(condition) == 0))
+		sprintf(sql,"select count(1) from %s",tableName);
+	else
+		sprintf(sql,"select count(1) from %s where %s",tableName, condition);
+
+	UnionLog("in UnionSelectRealDBRecordCounts:: sql=[%s]\n",sql);
+
+	EXEC SQL PREPARE S_1 FROM :sql;
+	if (sqlca.sqlcode != 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: PREPARE sql=[%s],errcode=[%d]!\n",sql,sqlca.sqlcode);
+		UnionCloseDatabase();
+		return(0 - abs(sqlca.sqlcode));
+	}
+	EXEC SQL DECLARE CUR_S_1 CURSOR FOR S_1;
+	if (sqlca.sqlcode != 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: DECLARE sql=[%s],errcode=[%d]!\n",sql,sqlca.sqlcode);
+		UnionCloseDatabase();
+		return(0 - abs(sqlca.sqlcode));
+	}
+	EXEC SQL OPEN CUR_S_1;
+	if (sqlca.sqlcode != 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: OPEN sql=[%s],errcode=[%d]!\n",sql,sqlca.sqlcode);
+		UnionCloseDatabase();
+		return(0 - abs(sqlca.sqlcode));
+	}
+	EXEC SQL FETCH CUR_S_1 INTO :count;
+	if (sqlca.sqlcode != 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: FETCH sql=[%s],errcode=[%d]!\n",sql,sqlca.sqlcode);
+		UnionCloseDatabase();
+		return(0 - abs(sqlca.sqlcode));
+	}
+	// 2012-09-04 张永定增加
+	if (sqlca.sqlcode == 1403)
+		count = 0;
+	EXEC SQL CLOSE CUR_S_1;
+	if (sqlca.sqlcode != 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecordCounts:: CLOSE sql=[%s],errcode=[%d]!\n",sql,sqlca.sqlcode);
+		UnionCloseDatabase();
+		return(0 - abs(sqlca.sqlcode));
+	}
+	UnionLog("in UnionSelectRealDBRecordCounts:: count=[%d]\n",count);
+
+	return(count);
+}
+
+
+int free_select_list()
+{
+	int	i;
+	int	ret;
+	
+	/* 释放申请的空间*/
+	for (i = 0; i < MAX_ITEMS; i++)
+	{    
+		if (bind_dp->V[i] != (char *) 0)
+			free(bind_dp->V[i]);
+		free(bind_dp->I[i]);   /* MAX_ITEMS were allocated. */
+		if (select_dp->V[i] != (char *) 0)
+			free(select_dp->V[i]);
+		free(select_dp->I[i]); /* MAX_ITEMS were allocated. */
+	}
+
+	SQLSQLDAFree(SQL_SINGLE_RCTX, bind_dp);
+	SQLSQLDAFree(SQL_SINGLE_RCTX, select_dp);
+
+	EXEC SQL WHENEVER SQLERROR CONTINUE;
+	/* 关闭游标*/
+	//EXEC SQL CLOSE Curs;
+
+	EXEC SQL COMMIT WORK;
+
+	return(ret);
+}
+
+/*为SQLDA分配空间*/
+int alloc_descriptors(int size, int max_vname_len, int max_iname_len)
+{
+	int i;
+	/*SQLSQLDAAlloc的第一个参数是SQL语句的最大列数或输入宿主变量的最大个数。
+		*第二个参数，是指列名的最大长度，或参数名的最大长度。
+		*第三个参数，是指指示符变量名的最大长度。*/
+	/*给SQLDA分配空间，下面这个SQLDA用于输入参数*/
+	if ((bind_dp = SQLSQLDAAlloc(SQL_SINGLE_RCTX, size, max_vname_len, max_iname_len)) == (SQLDA *) 0)
+	{
+		UnionUserErrLog("in alloc_descriptors:: SQLSQLDAAlloc bind_dp error\n");
+		return(-1);
+	}
+	/*给SQLDA分配空间，下面这个SQLDA用于动态查询*/
+	if ((select_dp = SQLSQLDAAlloc (SQL_SINGLE_RCTX, size,max_vname_len, max_iname_len)) == (SQLDA *) 0)
+	{
+		UnionUserErrLog("in alloc_descriptors:: SQLSQLDAAlloc select_dp error\n");
+		return(-1);
+	}
+	/*设置最大的列数，或最大的变量数*/
+	select_dp->N = MAX_ITEMS;
+
+	/* 给存放指示符变量值和存放数据的变量申请空间。*/
+	for (i = 0; i < MAX_ITEMS; i++)
+	{
+		bind_dp->I[i] = (short *) malloc(sizeof (short));
+		select_dp->I[i] = (short *) malloc(sizeof(short));
+		bind_dp->V[i] = (char *) malloc(1);
+		select_dp->V[i] = (char *) malloc(1);
+	}
+	return(0);
+}
+
+/*设置宿主变量的信息*/
+int set_bind_variables()
+{
+	int	ret;
+	char	bind_var[64];
+
+	/* 通过DESCRIBE语句，将处理语句的参数名、数据类型等信息存放在bind_dp中*/
+	bind_dp->N = MAX_ITEMS;  /* Init. count of array elements. */
+	EXEC SQL DESCRIBE BIND VARIABLES FOR selct_id INTO bind_dp;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		UnionUserErrLog("in set_bind_variables:: DESCRIBE BIND VARIABLES sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in set_bind_variables:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		return(ret);
+	}
+	/* F小于0，表示SQLSQLDAAlloc()分配的空间不够，即实际参数的个数超出预算的最大值. */
+	if (bind_dp->F < 0)
+	{
+		UnionUserErrLog("in set_bind_variables:: Too many bind variables (%d), maximum is %d\n",-bind_dp->F, MAX_ITEMS);
+		return(-1);
+	}
+	/* 将N（最大值）设置为实际的参数个数*/
+	bind_dp->N = bind_dp->F;
+	return(0);
+}
+
+/*处理语句*/
+int process_select_list(char *tableName,char *record,int sizeOfRecord,char *fileName,int isUseNewMech, int beginNum, int endNum, int totalNum)
+{
+	int	i;
+	int	ret;
+	int	null_ok;
+	int	precision;
+	int	scale;
+	int	count = 0;;
+	char	buf[8192*2+1];
+	char	value[8192*2+1];
+	char	tmpBuf[128+1];
+	FILE	*fp = NULL;
+	PUnionTableDef	pobject = NULL;
+	int	offset;
+	int	tmpI;
+	
+	if ((record == NULL) && (fileName == NULL))
+	{
+		ret = UnionSetUserDefinedErrorCode(errCodeParameter);
+		UnionUserErrLog("in process_select_list:: record && fileName is null\n");
+		return(ret);
+	}
+
+	if((pobject = UnionFindTableDef(tableName)) == NULL)
+        {
+		ret = UnionSetUserDefinedErrorCode(errCodeParameter);
+                UnionUserErrLog("in process_select_list :: tableName = [%s] not found in image!\n", tableName);
+                return(ret);
+        }
+
+	if (fileName != NULL)
+	{
+		if ((fp = fopen(fileName,"w")) == NULL)
+		{
+			ret = UnionSetUserDefinedErrorCode(errCodeUseOSErrCode);
+			UnionUserErrLog("in process_select_list:: fopen [%s] error\n",fileName);
+			return(ret);
+		}
+	}
+
+	/* 如果是SELECT语句，则通过DESCRIBE函数返回列名、数据类型、长度和是否为NULL标志*/
+	select_dp->N = MAX_ITEMS;
+	EXEC SQL DESCRIBE SELECT LIST FOR selct_id INTO select_dp;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in process_select_list:: DESCRIBE BIND VARIABLES sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in process_select_list:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		return(ret);
+	}
+	/* 如果F小于0。则表示比预定的列数要多。*/
+	if (select_dp->F < 0)
+	{
+		ret = UnionSetUserDefinedErrorCode(errCodeParameter);
+		UnionUserErrLog("in process_select_list:: Too many select-list items (%d), maximum is %d\n",-(select_dp->F), MAX_ITEMS);
+		return(ret);
+	}
+	/* 设置最大列数为实际列数*/
+	select_dp->N = select_dp->F;
+	/* 为每列分配空间。
+	SQLNumberPrecV6() 函数的作用是从select_dp->L[i]获得精度和长度。
+	SQLColumnNullCheck() 函数的作用是检查该列是否为NULL。*/
+	
+	for (i = 0; i < select_dp->F; i++)
+	{
+		/* 关闭最高位*/
+		sqlnul (&(select_dp->T[i]),&(select_dp->T[i]), &null_ok);
+
+		switch (select_dp->T[i])
+		{
+			case  1 : /* CHAR */
+				break;
+			case  2 : /* NUMBER ，获得精度和范围*/
+				sqlprc(&select_dp->L[i], &precision, &scale); 
+				//SQLNumberPrecV6(SQL_SINGLE_RCTX, &(select_dp->L[i]), &precision, &scale);
+				/* 如果精度为0，则设置为最大值40 */
+				if (precision == 0)
+					precision = 40;
+					if (scale > 0)
+						select_dp->L[i] = sizeof(float);
+					else
+					{
+						//  modiefied 20140918
+						//select_dp->L[i] = sizeof(int);
+						select_dp->L[i] = sizeof(long);
+					}
+				break;
+
+			case  8 : /* LONG*/
+				select_dp->L[i] = 240;
+				break;
+
+			case 11 : /* ROWID datatype */
+				select_dp->L[i] = 18;
+				break;
+
+			case 12 : /* DATE datatype */
+				select_dp->L[i] = 9;
+				break;
+ 
+			case 23 : /* RAW datatype */
+				break;
+
+			case 24 : /* LONG RAW datatype */
+				select_dp->L[i] = 240;
+				break;
+		}
+		/* 申请空间给SQLDA来存放数据*/
+		if (select_dp->T[i] != 2)
+			select_dp->V[i] = (char *) realloc(select_dp->V[i],select_dp->L[i] + 1);  
+		else
+			select_dp->V[i] = (char *) realloc(select_dp->V[i],select_dp->L[i]);  
+
+		/* 除了LONG RAW和NUMBER，其他数据类型转换为字符型数据类型*/
+		if (select_dp->T[i] != 24 && select_dp->T[i] != 2)
+			select_dp->T[i] = 1;
+
+		/* 将 NUMBER数据类型转换为浮点型数据类型或int数据类型*/
+		if (select_dp->T[i] == 2)
+			if (scale > 0)
+				select_dp->T[i] = 4;  /* float */
+			else
+				select_dp->T[i] = 3;  /* int */
+
+	}
+	
+	/* 取出每一行数据*/
+	for (;;)
+	{
+		EXEC SQL FETCH Curs USING DESCRIPTOR select_dp;
+		if (ret = 0 - abs(sqlca.sqlcode))
+		{
+			if (SQLNOTFOUND == sqlca.sqlcode)
+				break;
+			ret = UnionGetDBErrCode();
+			UnionUserErrLog("in process_select_list:: sqlca.sqlcode[%d]\n",sqlca.sqlcode);
+			UnionUserErrLog("in process_select_list:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+			if (fp != NULL)
+			{
+				fflush(fp);
+				fclose(fp);
+			}
+			return(ret);
+		}
+
+		count ++;
+		
+		memset(buf,0,sizeof(buf));
+		/*输出列数据。除了float和int数据类型，其他数据类型都被转为字符型*/
+		offset = 0;
+		for (i = 0; i < select_dp->F; i++)
+		{
+			memset(value,0,sizeof(value));
+			if (*select_dp->I[i] >= 0)
+			{
+				if (select_dp->T[i] == 3)     /* int datatype */
+				{
+					// modiefied 20140918
+					//sprintf(value,"%d", *(int *)select_dp->V[i]);
+					sprintf(value,"%ld", *(long *)select_dp->V[i]);
+				}
+				else if (select_dp->T[i] == 4)/* float datatype*/
+					sprintf(value,"%.2f", *(float *)select_dp->V[i]);
+				else		       /* character string */
+					sprintf(value,"%.*s",(int)select_dp->L[i], select_dp->V[i]);
+			}
+			UnionFilterHeadAndTailBlank(value);
+			memset(tmpBuf,0,sizeof(tmpBuf));
+			memcpy(tmpBuf,select_dp->S[i],MAX_VNAME_LEN);
+			//UnionLog("xx [%s][%04d]\n",tmpBuf,(int)select_dp->L[i]);
+			UnionFilterHeadAndTailBlank(tmpBuf);
+			//UnionToLowerCase(tmpBuf);
+			UnionConvertObjectFldName(pobject,tmpBuf,tmpBuf);
+			//UnionLog("[%0x][%s]=[%04d][%s]\n",buf,tmpBuf,strlen(value),value);
+			if ((ret = UnionPutRecFldIntoRecStr(tmpBuf,value,strlen(value),buf+offset,sizeof(buf)-offset)) < 0)
+			{
+				UnionUserErrLog("in process_select_list:: UnionPutRecFldIntoRecStr [%s] [%04d] [%s]\n",tmpBuf,strlen(value),value);
+				if (fp != NULL)
+					fclose(fp);
+				return(ret);
+			}
+			//UnionLog("**[%0x]record=[%04d][%s]\n",buf+offset,ret,buf+offset);
+			offset += ret;
+			//UnionLog("[%0x]record=[%04d][%s]\n",buf,offset,buf);
+			/*
+			strcat(buf,tmpBuf);
+			strcat(buf,"=");
+			strcat(buf,value);
+			strcat(buf, "|");
+			*/
+		}
+		//UnionLog("final record=[%04d][%s]\n",offset,buf);
+		if (fp != NULL)
+		{
+			strcat(buf,"\n");
+			fputs(buf, fp);	
+		}
+		else
+		{
+			if (count > 1)
+				return(errCodeDatabaseMDL_MoreRecordFound);
+			
+			if (strlen(buf) > sizeOfRecord - 1)
+			{
+				
+				UnionUserErrLog("in process_select_list:: lenOfBuf[%d] >  sizeOfRecord - 1[%d]\n",strlen(buf),sizeOfRecord - 1);
+				return(errCodeParameter);
+			}
+			strcpy(record,buf);
+		}
+	}
+
+	//UnionLog("in process_select_list:: *** totalNum = [%d]\n",count);
+	if (count == 0) {
+		if (fp != NULL)
+			fclose(fp);
+		return(errCodeDatabaseMDL_RecordNotFound);
+	}
+
+	if (fp != NULL)
+	{
+		if (isUseNewMech)
+		{
+			memset(buf, 0, sizeof buf);
+			sprintf(buf, "%s=%d", "totalRecNum", totalNum);
+			fputs(buf,fp);
+		}
+		fflush(fp);
+		fclose(fp);
+		return(count);
+	}
+	else
+		return(strlen(record));
+}
+
+int UnionUpdateRealDBRecord(char *tableName,char *field,char *condition)
+{
+	int	ret;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sql[8192*2+1];
+	EXEC SQL END DECLARE SECTION;
+	
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionLog("in UnionUpdateRealDBRecord:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	memset(sql,0,sizeof(sql));
+	if ((condition == NULL) || (strlen(condition) == 0))
+		sprintf(sql,"update %s set %s",tableName,field);
+	else
+		sprintf(sql,"update %s set %s where %s",tableName,field,condition);
+	
+	UnionProgramerLog("in UnionUpdateRealDBRecord::sql=[%s]\n", sql);
+	
+	EXEC SQL EXECUTE IMMEDIATE :sql;
+	if ((sqlca.sqlcode == 100 || sqlca.sqlcode == 1403))
+	{
+		UnionProgramerLog("in UnionUpdateRealDBRecord:: skiping no record log, sql = [%s]\n", sql);
+		return(0);
+	}
+
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionUpdateRealDBRecord:: update sql = [%s]\n",sql);
+		UnionUserErrLog("in UnionUpdateRealDBRecord:: EXECUTE IMMEDIATE sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionUpdateRealDBRecord:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		UnionCloseDatabase();
+		return(ret);
+	}
+
+	EXEC SQL COMMIT WORK;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionUpdateRealDBRecord:: EXEC SQL COMMIT WORK sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionCloseDatabase();
+		return(ret);
+	}
+
+	return(0);
+}
+
+int UnionInsertRealDBRecord(char *tableName,char *record,int lenOfRecord)
+{
+	int	ret;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sql[8192*2+1];
+	EXEC SQL END DECLARE SECTION;
+	
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionLog("in UnionInsertRealDBRecord:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	memset(sql,0,sizeof(sql));
+	sprintf(sql,"insert into %s %s",tableName,record);
+	
+	UnionProgramerLog("in UnionInsertRealDBRecord::sql=[%s]\n", sql);
+	
+	EXEC SQL EXECUTE IMMEDIATE :sql;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionInsertRealDBRecord:: insert sql = [%s]\n",sql);
+		UnionUserErrLog("in UnionInsertRealDBRecord:: EXECUTE IMMEDIATE sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionInsertRealDBRecord:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		if (ret == -1)
+		{
+			ret = errCodeObjectMDL_PrimaryKeyIsRepeat;
+		}
+		else
+		{
+			UnionCloseDatabase();
+		}
+		return(ret);
+	}
+
+	EXEC SQL COMMIT WORK;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionInsertRealDBRecord:: EXEC SQL COMMIT WORK sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionCloseDatabase();
+		return(ret);
+	}
+	return(0);
+}
+
+int UnionDeleteRealDBRecord(char *tableName,char *condition)
+{
+	int	ret;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sql[1024+1];
+	EXEC SQL END DECLARE SECTION;
+	
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionLog("in UnionDeleteRealDBRecord:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	memset(sql,0,sizeof(sql));
+	if ( (condition == NULL) || (strlen(condition) == 0))
+		sprintf(sql,"delete from %s",tableName);
+	else
+		sprintf(sql,"delete from %s where %s",tableName,condition);
+
+	EXEC SQL EXECUTE IMMEDIATE :sql;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		if (ret == -1403)
+			return (errCodeDatabaseMDL_RecordNotFound);
+		UnionCloseDatabase();
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionDeleteRealDBRecord:: delete sql = [%s]\n",sql);
+		UnionUserErrLog("in UnionDeleteRealDBRecord:: EXECUTE IMMEDIATE sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionDeleteRealDBRecord:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		return(ret);
+	}
+
+	EXEC SQL COMMIT WORK;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		UnionUserErrLog("in UnionDeleteRealDBRecord:: EXEC SQL COMMIT WORK sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionCloseDatabase();
+		return(ret);
+	}
+	return(0);
+}
+
+int UnionExecRealDBSql(char *sql)
+{
+	int	ret;
+	int	cnt;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sqlStr[1024*2+1];
+	EXEC SQL END DECLARE SECTION;
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionLog("in UnionExecRealDBSql:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	memset(sqlStr, 0, sizeof(sqlStr));
+	strcpy(sqlStr, sql);
+
+	EXEC SQL EXECUTE IMMEDIATE :sqlStr;
+	//UNIONCHECKERR("in UnionExecRealDBSql:: EXEC SQL EXECUTE IMMEDIATE :sqlStr");
+
+	if ((sqlca.sqlcode == 100) || (sqlca.sqlcode == 1403))
+	{
+		EXEC SQL COMMIT;
+		return 0;
+	}
+
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		UnionUserErrLog("in UnionExecRealDBSql:: EXECUTE IMMEDIATE sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionExecRealDBSql:: sqlStr = [%s]\n",sqlStr);
+		EXEC SQL ROLLBACK;
+		//UNIONCHECKERR ("in UnionExecRealDBSql:: EXEC SQL ROLLBACK");
+		UnionCloseDatabase();
+		return(ret);
+	}
+
+	cnt = sqlca.sqlerrd[2];
+	UnionProgramerLog("in UnionExecRealDBSql::cnt=[%d]\n", cnt);
+
+	EXEC SQL COMMIT;
+	//UNIONCHECKERR ("in UnionExecRealDBSql:: EXEC SQL COMMIT");
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		UnionUserErrLog("in UnionExecRealDBSql:: sqlStr = [%s]\n", sqlStr);
+		UnionUserErrLog("in UnionExecRealDBSql:: EXEC SQL COMMIT sqlca.sqlcode = [%d]\n", sqlca.sqlcode);
+		//UnionUserErrLog("in UnionExecRealDBSql:: sqlca.sqlerrmc[%s]\n",sqlca.sqlerrmc);
+		EXEC SQL ROLLBACK;
+		//UNIONCHECKERR("in UnionExecRealDBSql:: EXEC SQL ROLLBACK");
+		UnionCloseDatabase();
+		return(ret);
+	}
+
+	return(cnt);
+}
+
+// Add By Huangbaoxin, 2009/10/15
+int UnionOpenRealDBSql(char *sql, char *record, int sizeOfRecord)
+{
+	int	ret, i;
+	int	null_ok, scale, precision;
+	char	value[1024+1], strFieldName[128+1];
+	int	isOpenSelectCur = 0;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sqlStr[1024+1];
+	EXEC SQL END DECLARE SECTION;
+	
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionOpenRealDBSql:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	if ((ret = alloc_descriptors(MAX_ITEMS, MAX_VNAME_LEN, MAX_INAME_LEN)) != 0)
+	{
+		UnionUserErrLog("in UnionOpenRealDBSql:: alloc_descriptors!\n");
+		UnionCloseDatabase();
+		return(ret);
+	}
+	
+	memset(sqlStr, 0, sizeof(sqlStr));
+	strcpy(sqlStr, sql);
+	
+	UnionProgramerLog("in UnionOpenRealDBSql::sqlStr=[%s]\n", sqlStr);
+	
+	/* 对该SQL语句做PREPARE操作 */
+	EXEC SQL PREPARE openSelectCmd FROM :sqlStr;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionOpenRealDBSql:: sqlStr = [%s]\n",sqlStr);
+		UnionUserErrLog("in UnionOpenRealDBSql:: prepare sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionOpenRealDBSql:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		UnionCloseDatabase();
+		goto exitFlag;
+	}
+	/*声明游标*/
+	EXEC SQL DECLARE openSelectCur CURSOR FOR openSelectCmd;
+ 	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionOpenRealDBSql:: sqlStr = [%s]\n",sqlStr);
+		UnionUserErrLog("in UnionOpenRealDBSql:: DECLARE CURSOR sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionOpenRealDBSql:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		UnionCloseDatabase();
+		goto exitFlag;
+	}
+	
+	/* 提示用户输入参数值*/
+	/* 通过DESCRIBE语句，将处理语句的参数名、数据类型等信息存放在bind_dp中*/
+	bind_dp->N = MAX_ITEMS;  /* Init. count of array elements. */
+	EXEC SQL DESCRIBE BIND VARIABLES FOR openSelectCmd INTO bind_dp;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		UnionUserErrLog("in UnionOpenRealDBSql:: DESCRIBE BIND VARIABLES sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionOpenRealDBSql:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		goto exitFlag;
+	}
+	/* F小于0，表示SQLSQLDAAlloc()分配的空间不够，即实际参数的个数超出预算的最大值. */
+	if (bind_dp->F < 0)
+	{
+		UnionUserErrLog("in UnionOpenRealDBSql:: Too many bind variables (%d), maximum is %d\n",-bind_dp->F, MAX_ITEMS);
+		ret = -1;
+		goto exitFlag;
+	}
+	/* 将N（最大值）设置为实际的参数个数*/
+	bind_dp->N = bind_dp->F;
+
+	/* 打开游标 */
+	EXEC SQL OPEN openSelectCur USING DESCRIPTOR bind_dp;
+ 	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionOpenRealDBSql:: select sql = [%s]\n",sql);
+		UnionUserErrLog("in UnionOpenRealDBSql:: OPEN CURSOR sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionOpenRealDBSql:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		UnionCloseDatabase();
+		goto exitFlag;
+	}
+	isOpenSelectCur = 1;
+
+	/* 如果是SELECT语句，则通过DESCRIBE函数返回列名、数据类型、长度和是否为NULL标志*/
+	select_dp->N = MAX_ITEMS;
+	EXEC SQL DESCRIBE SELECT LIST FOR openSelectCmd INTO select_dp;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionOpenRealDBSql:: DESCRIBE BIND VARIABLES sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionOpenRealDBSql:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		goto exitFlag;
+	}
+	/* 如果F小于0。则表示比预定的列数要多。*/
+	if (select_dp->F < 0)
+	{
+		UnionUserErrLog("in UnionOpenRealDBSql:: Too many select-list items (%d), maximum is %d\n",-(select_dp->F), MAX_ITEMS);
+		ret = -1;
+		goto exitFlag;
+	}
+	/* 设置最大列数为实际列数*/
+	select_dp->N = select_dp->F;
+	/* 为每列分配空间。*/
+	for (i = 0; i < select_dp->F; i++)
+	{
+		/* 关闭最高位*/
+		sqlnul (&(select_dp->T[i]),&(select_dp->T[i]), &null_ok);
+
+		switch (select_dp->T[i])
+		{
+			case  1 : /* CHAR */
+				break;
+			case  2 : /* NUMBER ，获得精度和范围*/
+				sqlprc(&select_dp->L[i], &precision, &scale); 
+				//SQLNumberPrecV6(SQL_SINGLE_RCTX, &(select_dp->L[i]), &precision, &scale);
+				/* 如果精度为0，则设置为最大值40 */
+				if (precision == 0)
+					precision = 40;
+					if (scale > 0)
+						select_dp->L[i] = sizeof(float);
+					else
+						select_dp->L[i] = sizeof(int);
+				break;
+
+			case  8 : /* LONG*/
+				select_dp->L[i] = 240;
+				break;
+
+			case 11 : /* ROWID datatype */
+				select_dp->L[i] = 18;
+				break;
+
+			case 12 : /* DATE datatype */
+				select_dp->L[i] = 9;
+				break;
+ 
+			case 23 : /* RAW datatype */
+				break;
+
+			case 24 : /* LONG RAW datatype */
+				select_dp->L[i] = 240;
+				break;
+		}
+		/* 申请空间给SQLDA来存放数据*/
+		//UnionProgramerLog("in UnionOpenRealDBSql:: ==[Ti=%d]==select_dp->V[%d]=[%x]=======select_dp->L[i] = [%d]\n", select_dp->T[i], i, select_dp->V[i], select_dp->L[i]);
+		if (select_dp->T[i] != 2)
+		{
+			select_dp->V[i] = (char *) realloc(select_dp->V[i],select_dp->L[i] + 1);  
+		}
+		else
+		{
+			select_dp->V[i] = (char *) realloc(select_dp->V[i],select_dp->L[i]);  
+		}
+
+		/* 除了LONG RAW和NUMBER，其他数据类型转换为字符型数据类型*/
+		if (select_dp->T[i] != 24 && select_dp->T[i] != 2)
+			select_dp->T[i] = 1;
+
+		/* 将 NUMBER数据类型转换为浮点型数据类型或int数据类型*/
+		if (select_dp->T[i] == 2)
+			if (scale > 0)
+				select_dp->T[i] = 4;  /* float */
+			else
+				select_dp->T[i] = 3;  /* int */
+	}
+	
+	// 读出数据
+	EXEC SQL FETCH openSelectCur USING DESCRIPTOR select_dp;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		if (SQLNOTFOUND == sqlca.sqlcode)
+			goto exitFlag;
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionOpenRealDBSql:: sqlca.sqlcode[%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionOpenRealDBSql:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		goto exitFlag;
+	}
+
+	for (i = 0; i < select_dp->F; i++)
+	{
+		memset(value,0,sizeof(value));
+		if (*select_dp->I[i] >= 0)
+		{
+			if (select_dp->T[i] == 3)     /* int datatype */
+				sprintf(value,"%d", *(int *)select_dp->V[i]);
+			else if (select_dp->T[i] == 4)/* float datatype*/
+				sprintf(value,"%.2f", *(float *)select_dp->V[i]);
+			else		       /* character string */
+				sprintf(value,"%.*s",(int)select_dp->L[i], select_dp->V[i]);
+		}
+		UnionFilterHeadAndTailBlank(value);
+		
+		sprintf(strFieldName, "FIELD%d", i);
+
+		if ( (ret = UnionPutRecFldIntoRecStr(strFieldName, value, strlen(value),
+				record + strlen(record), sizeOfRecord - strlen(record))) < 0 )
+		{
+			UnionUserErrLog("in UnionOpenRealDBSql:: UnionPutRecFldIntoRecStr [%s] [%04d] [%s]\n",
+				strFieldName, strlen(value), value);
+			goto exitFlag;
+		}
+	}
+	
+	UnionProgramerLog("in UnionOpenRealDBSql::record=[%s]\n", record);
+	ret = 0;
+exitFlag:
+	/* 释放申请的空间*/
+	if(isOpenSelectCur)
+	{
+		EXEC SQL CLOSE openSelectCur;
+	}
+	free_select_list();
+	
+	return(ret);
+}
+
+int UnionSelectDBRecordByRealSQL(char *tableName, char *strSql, char *record, int sizeOfRecord, char *fileName)
+{
+	char    tmpStr[20+1];
+	int	i;
+	int	ret;
+	int	sqlLen;
+	FILE	*fp;
+	
+	memset(tmpStr, 0, sizeof tmpStr);
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sql[8192+1];
+	EXEC SQL END DECLARE SECTION;
+	
+	//UnionAuditLog("in UnionSelectDBRecordByRealSQL::begin[%s][%s][%s]\n", tableName, field, condition);
+	
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	if ((ret = alloc_descriptors(MAX_ITEMS, MAX_VNAME_LEN, MAX_INAME_LEN)) != 0)
+	{
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: alloc_descriptors!\n");
+		UnionCloseDatabase();
+		return(ret);
+	}
+
+	memset(sql,0,sizeof(sql));
+	strcpy(sql, strSql);
+
+	UnionProgramerLog("in UnionSelectDBRecordByRealSQL:: sql=[%s]!\n",sql);
+
+	/* 对该SQL语句做PREPARE操作 */
+	EXEC SQL prepare selct_id from :sql;
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: select sql = [%s]\n",sql);
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: prepare sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		UnionCloseDatabase();
+		return(ret);
+	}
+	/*声明游标*/
+	EXEC SQL DECLARE Curs CURSOR FOR selct_id;
+ 	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: select sql = [%s]\n",sql);
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: DECLARE CURSOR sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		UnionCloseDatabase();
+		return(ret);
+	}
+	/* 提示用户输入参数值*/
+	set_bind_variables();
+	/* 打开游标 */
+	EXEC SQL OPEN Curs USING DESCRIPTOR bind_dp;
+ 	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: select sql = [%s]\n",sql);
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: OPEN CURSOR sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: sqlca.sqlerrm.sqlerrmc[%s]\n",sqlca.sqlerrm.sqlerrmc);
+		UnionCloseDatabase();
+		return(ret);
+	}
+
+	/* 处理语句，并输出结果*/
+	if ((ret = process_select_list(tableName,record,sizeOfRecord,fileName,0,0, 0, 0)) < 0)
+	{
+		free_select_list();
+		EXEC SQL CLOSE Curs;
+		if (ret == errCodeDatabaseMDL_RecordNotFound)
+		{
+			UnionLog("in UnionSelectDBRecordByRealSQL::no data found from [%s]!\n",tableName);
+			return(0);
+		}
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: select sql = [%s]\n",sql);
+		UnionCloseDatabase();
+		return(ret);
+	}
+	free_select_list();
+	EXEC SQL CLOSE Curs;
+	//UnionLog("in UnionSelectDBRecordByRealSQL::ret[%d][%s]\n", ret,record);
+	return(ret);
+
+}
+
+int UnionSelectOneFieldBySQL(char *fldDescription, char *tableName, char *condition, int lenOfResultBuf, char *resultBuf)
+{
+	int			ret;
+	
+	
+	EXEC SQL BEGIN DECLARE SECTION;
+	char			sql[2048];
+	char			result[4096];
+	EXEC SQL END DECLARE SECTION;
+	
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionSelectOneFieldBySQL:: UnionConnectDatabase ret = %d!\n", ret);
+		return(ret);
+	}
+	
+	memset(sql, 0, sizeof(sql));
+	memset(result, 0, sizeof(result));
+	if(condition == NULL || strlen(condition) == 0)
+	{
+		sprintf(sql, "select %s from %s", fldDescription, tableName);
+	}
+	else
+	{
+		sprintf(sql, "select %s from %s where %s", fldDescription, tableName, condition);
+	}
+	UnionProgramerLog("in UnionSelectOneFieldBySQL:: excute sql = [%s]!\n", sql);
+
+	EXEC SQL PREPARE S1 FROM :sql;
+	EXEC SQL DECLARE CUR_S1 CURSOR FOR S1;
+	EXEC SQL OPEN CUR_S1;
+	EXEC SQL FETCH CUR_S1 INTO :result;
+	EXEC SQL CLOSE CUR_S1;
+	
+	UnionRTrim(resultBuf);
+	strncpy(resultBuf, result, lenOfResultBuf);
+	//UnionProgramerLog("in UnionSelectOneFieldBySQL:: reslut str= [%s]!\n", result);
+	return(0);
+}
+
+int UnionGetDBSequenceValueOfICCardID(char *certID)
+{
+	int			ret;
+	char			resultBuf[128];
+	
+	memset(resultBuf, 0, sizeof(resultBuf));
+	if ((ret = UnionSelectOneFieldBySQL("kms_iccard_id.nextval", "sys.dual", NULL, sizeof(resultBuf) - 1, resultBuf)) < 0)
+	{
+		UnionUserErrLog("in UnionGetDBSequenceValueOfICCardID:: UnionSelectOneFieldBySQL ret = %d!\n", ret);
+		return(ret);
+	}
+
+	ret = atoi(resultBuf);
+	if(ret < 1 || ret > 16777215)
+	{
+		UnionAuditLog("in UnionGetDBSequenceValueOfICCardID:: db Sequence kms_iccard_id not defined ret = %d!\n", ret);
+		return(errCodeObjectMDL_ObjectDefinitionNotExists); // Sequence没有定义时返回值为不在区间
+	}
+	
+	sprintf(resultBuf, "unvarValue = %d", ret);
+	//UnionUpdateRealDBRecord("thisKmcInfo", resultBuf, "unvarName = 'currCardSeqNo'");
+	sprintf(certID, "%06X", ret);
+
+	UnionProgramerLog("in UnionGetDBSequenceValueOfICCardID:: certID = [%s]!\n", certID);
+
+	return(6);
+
+}
+int UnionGetCurrentDBSequenceValueOfICCardID(char *certID)
+{
+	int			ret;
+	char			resultBuf[128];
+	
+	memset(resultBuf, 0, sizeof(resultBuf));
+	if ((ret = UnionSelectOneFieldBySQL("kms_iccard_id.currval", "sys.dual", NULL, sizeof(resultBuf) - 1, resultBuf)) < 0)
+	{
+		UnionUserErrLog("in UnionGetCurrentDBSequenceValueOfICCardID:: UnionSelectOneFieldBySQL ret = %d!\n", ret);
+		return(ret);
+	}
+
+	ret = atoi(resultBuf);
+	
+	sprintf(resultBuf, "unvarValue = %d", ret);
+	//UnionUpdateRealDBRecord("thisKmcInfo", resultBuf, "unvarName = 'currCardSeqNo'");
+	sprintf(certID, "%06X", ret);
+
+	UnionProgramerLog("in UnionGetCurrentDBSequenceValueOfICCardID:: certID = [%s]!\n", certID);
+
+	return(6);
+
+}
+
+int UnionReadOneUniqueStringFieldFromRealDB(char *tableName, char *fieldName)
+{
+	return(0);
+}
+
+int UnionReadVarFromThisKmcInfo(char *varName, int sizeOfVarValue, char *varValue)
+{
+	return(0);
+}
+
+int UnionUpdateVarOnThisKmcInfo(char *varName, char *varValue)
+{
+	return(0);
+}
+
+int UnionReadSequenceVarFromThisKmcInfo(char *varName, char *varValue)
+{
+	return(0);
+	/*
+	EXEC SQL BEGIN DECLARE SECTION;
+		char		db_varName[40+1];
+		char		db_varValue[1024+1];
+		char		dbvk[4096+1];
+	EXEC SQL END DECLARE SECTION;
+	
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionReadSequenceVarFromThisKmcInfo:: UnionConnectDatabase ret = %d!\n", ret);
+		return(ret);
+	}
+
+        memset(db_varName, 0, sizeof(db_varName));
+        memset(db_varValue, 0, sizeof(db_varValue));
+
+        EXEC SQL SELECT unbatchNo, unseqNo, unpk, unvk INTO :batchNo, :seqNo, :dbpk, :dbvk FROM rsaKeyPool WHERE unlength=:keyLen AND rownum=1 FOR UPDATE;
+        if ((ret = (0 - abs(sqlca.sqlcode))) < 0)
+        {
+                UnionUserErrLog("in UnionGetICCardRsaKeyFromPoolUseDBLock:: SELECT errcode = %d\n", sqlca.sqlcode);
+                UnionCloseDatabase();
+                return(ret);
+        }
+        UnionRTrim(dbpk);
+        UnionRTrim(dbvk);
+        strcpy(vk, dbvk);
+        strcpy(pk, dbpk);
+
+        EXEC SQL DELETE FROM rsaKeyPool WHERE unbatchNo=:batchNo AND unseqNo=:seqNo;
+        if ((ret = (0 - abs(sqlca.sqlcode))) < 0)
+        {
+                UnionUserErrLog("in UnionGetICCardRsaKeyFromPoolUseDBLock:: DELETE errcode = %d ret = %d\n", sqlca.sqlcode, ret);
+                EXEC SQL COMMIT;
+                UnionCloseDatabase();
+                return(ret);
+        }
+        EXEC SQL COMMIT;
+        UnionProgramerLog("in UnionGetICCardRsaKeyFromPoolUseDBLock:: rsakey batchNo = %d seqNo = %s\n", batchNo, seqNo);
+
+        return 0;
+	return(0);
+	*/
+}

@@ -1,0 +1,88 @@
+export LANG="zh_CN.gb18030"
+OSName=`uname`
+
+# 定义cmm2003的开发环境
+# 定义主开发目录
+CMM2003DIR=$HOME/develop
+export CMM2003DIR
+export DEVDIR=$CMM2003DIR
+
+# 定义cmm2003的开发环境
+UNIONLIBDIR=/cmmDevLib/
+export UNIONLIBDIR
+
+PATH=$PATH:$CMM2003DIR/ktools:.
+export PATH
+
+. $UNIONLIBDIR/bin.x/changeOsBit.x 64 
+
+# 设置coredump产生core文件
+ulimit -c unlimited
+alias rm="rm -i"
+
+# ORACLE
+# 访问Oracle11g客户端
+export ORACLE_BASE=/opt/oracle/
+#export ORACLE_HOME=$ORACLE_BASE/product/11gR2/db
+#export ORACLE11g_HOME=$ORACLE_BASE/product/11gR2/db
+export ORACLE_HOME=$ORACLE_BASE/product/11g/
+#export ORACLE_HOME=$ORACLE_BASE/product/10g/
+export ORACLE11g_HOME=$ORACLE_BASE/product/11g/
+if [ $OSName == "AIX" ] ; then
+	export ORACLE_BASE=/opt/oracle/
+	export ORACLE_HOME=$ORACLE_BASE/product/10.2.0
+	export ORACLE11g_HOME=/u2/ora11g/oracle11g/ora11gClient/ora11g_1_client
+fi
+
+if [ $OSName == "HP-UX" ] ; then
+	export ORACLE_BASE=/opt/oracle/
+	export ORACLE_HOME=$ORACLE_BASE/product/11.2.0/dbhome_1
+	export ORACLE11g_HOME=$ORACLE_BASE/product/11.2.0/dbhome_1
+fi
+
+# ORACLE数据库
+if [ $UNION_USE_BITS -eq 64 ] ; then
+	export ORACLE_LIB_DIR=$ORACLE_HOME/lib
+else    
+	export ORACLE_LIB_DIR=$ORACLE_HOME/lib32
+fi
+
+# informix
+if [ $OSName == "AIX" ] ; then
+        INFORMIXDIR=/opt/informix/csdk
+else
+        INFORMIXDIR=/opt/informix/csdk
+fi
+if [ $UNION_USE_BITS -eq 64 ] ; then
+	export INFORMIXLIB=$INFORMIXDIR/lib
+else    
+	export INFORMIXDIR=$INFORMIXDIR/lib
+fi
+INFORMIXSERVER=informixsvr
+ONCONFIG=onconfig.cs
+DBDATE=MDY4*
+LD_LIBRARY_PATH=$INFORMIXDIR/lib:$INFORMIXDIR/lib/esql:$LD_LIBRARY_PATH
+export INFORMIXDIR INFORMIXSERVER ONCONFIG LD_LIBRARY_PATH
+
+PATH=$PATH:$INFORMIXDIR/bin:.
+export PATH
+
+# db2 实例访问的profile
+if [ $OSName == "AIX" ] ; then
+	DIROFDB2=/home/db2inst2/sqllib/
+else
+	DIROFDB2=/opt/db2inst2/sqllib/
+fi
+export DIROFDB2
+
+# 访问Mysql
+#export MYSQLCONFIG="-L/usr/lib -lmysql"
+export MYSQLCONFIG="/usr/lib64/mysql/libmysqlclient.a"
+
+export UNIONREC=$UNIONLIBDIR/bin/
+
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/:usr/lib:$ORACLE_LIB_DIR:.
+export LD_LIBRARY_PATH
+
+PATH=$PATH:$ORACLE_HOME/bin:$INFORMIXDIR/bin:$CMM2003DIR/ktools：.
+export PATH

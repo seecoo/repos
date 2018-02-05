@@ -1,0 +1,1860 @@
+/*
+Author:	dengjf
+Date:	20090511
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "unionErrCode.h"
+#include "UnionLog.h"
+
+#include "unionRealBaseDB.h"
+#include "unionTblDef.h"
+
+#include <sqlca.h>
+#include <sqlda.h>
+#include <sqlcodes.h>
+#include <sql.h>
+EXEC SQL INCLUDE SQLCA;
+EXEC SQL INCLUDE SQLDA;
+
+EXEC SQL WHENEVER NOT FOUND CONTINUE ;
+EXEC SQL WHENEVER SQLWARNING CONTINUE ;
+EXEC SQL WHENEVER SQLERROR CONTINUE ;
+
+
+#ifdef _IS_USE_DB2_
+
+#include "unionRealDBCommon.h"
+#include "unionTblDef.h"
+#include "unionTableDef.h"
+
+EXEC SQL BEGIN DECLARE SECTION;
+char    DBUserName[64];
+char    DBPasswd[64];
+char    DBname[64];
+EXEC SQL END DECLARE SECTION;
+
+int UnionGetDBErrCode()
+{
+	int                     ret;
+
+	ret = 0 - abs(sqlca.sqlcode);
+
+	// 设计数据库错误码偏移
+	// ret = ret + db2ErrCodeOffset .......
+
+	return(UnionSetUserDefinedErrorCode(ret));
+}
+
+int UnionIsFatalDBErrCode(int dbErrCode)
+{
+	int	ret;
+	char	varName[100];
+
+	memset(varName, 0, sizeof varName);
+	sprintf(varName,"fatalDBErr%d",abs(dbErrCode));
+	if (UnionReadIntTypeRECVar(varName) > 0) 
+	{
+		return(1); // 兼容旧版本
+	}
+
+	sprintf(varName,"fatalDB2DBErr%d",abs(dbErrCode));
+	if (UnionReadIntTypeRECVar(varName) > 0)
+	{
+		return(1);
+	}
+
+	return 0;
+}
+
+int UnionCheckSQLError(char *pMsg, struct sqlca *pSQLCA)
+{
+	char eBuffer[1024];
+	char sBuffer[1024];
+	short rc, Erc;
+	char	varName[100];
+
+	// 通过SQLCODE来判断是否出错
+	if (pSQLCA->sqlcode != 0)
+	{
+		UnionGetDBErrCode();
+		UnionUserErrLog("\n=-=-=-=-= BEGIN DB2 ERROR REPORT =-=-=-=-=\n");
+		UnionUserErrLog("pMsg = [%s]\n",pMsg);
+		UnionUserErrLog("SQLCODE = [%ld]\n",pSQLCA->sqlcode);
+		memset(eBuffer,0,sizeof(eBuffer));
+		memset(sBuffer,0,sizeof(sBuffer));
+
+		// 获取SQLSTATE信息
+		rc = sqlogstt (sBuffer,1024,80,pSQLCA->sqlstate);
+
+		// 获取调用API的错误信息
+		Erc = sqlaintp (eBuffer,1024,80,pSQLCA);
+
+		// Erc中存放了eBuffer 的长度
+		if (Erc > 0)
+		{
+			UnionUserErrLog("get call db2 api error msg = [%s]\n",eBuffer);
+		}
+		if (pSQLCA->sqlcode < 0)
+		{
+			// 错误信息
+			UnionGetDBErrCode();
+			if (rc == 0)
+			{
+				UnionUserErrLog("get SQLSTATE error msg = [%s]\n",sBuffer);
+			}
+			UnionUserErrLog ("=-=-=-=-= END DB2 ERROR REPORT =-=-=-=-=\n\n");
+			// 2009/10/9,王纯军增加
+			if (abs(pSQLCA->sqlcode) != 805)
+			{
+				memset(varName,0,sizeof(varName));
+				sprintf(varName,"fatalDBErr%d",abs(pSQLCA->sqlcode));
+				if (UnionReadIntTypeRECVar(varName) > 0)
+					UnionCloseDatabase();
+			}
+			// 2009/10/9,王纯军增加结束
+			return(1);
+		}
+		else
+		{
+			// 仅仅是警告信息
+			if (rc == 0)
+			{
+				UnionUserErrLog("get SQLSTATE warning msg = [%s]\n", sBuffer);
+			}
+			UnionUserErrLog("DB2 WARNING:: CONTINUING PROGRAM WITH WARNINGS\n");
+			UnionUserErrLog("=-=-=-=-= END DB2 ERROR REPORT =-=-=-=-=\n\n");
+			return(0);
+		} // endif
+	} // endif
+	/***del by xusj 20100607 begin ***
+	else
+	{
+		UnionProgramerLog("\n=-=-=-=-= BEGIN DB2 PROGRAMER REPORT =-=-=-=-=\n");
+		UnionProgramerLog("pMsg = [%s]\n",pMsg);
+		UnionProgramerLog("SQLCODE = [%ld],SQL RUN OK\n",pSQLCA->sqlcode);
+		UnionProgramerLog("=-=-=-=-= END DB2 PROGRAMER REPORT =-=-=-=-=\n\n");
+	}
+	***del by xusj 20100607 end ***/
+
+	return(0);
+}
+
+/**************************************************************************
+* 函数：	UnionInitSQLDA
+*	为SQLDA分配空间。其中SQLDASIZE的作用，是计算SQLDA的大小。
+*	返回-1，表示无法分配空间。
+**************************************************************************/
+int UnionInitSQLDA(SQLDA **pSQLDA,int pSQLDALen)
+{
+	int idx;
+	*pSQLDA = (struct sqlda *) malloc (SQLDASIZE(pSQLDALen));
+	if (*pSQLDA == NULL)
+		return (-1);
+	memset (*pSQLDA, '\0', SQLDASIZE(pSQLDALen));
+	strncpy((*pSQLDA)->sqldaid, "SQLDA   ", sizeof ((*pSQLDA)->sqldaid));
+	(*pSQLDA)->sqldabc = (long)SQLDASIZE(pSQLDALen);
+	(*pSQLDA)->sqln = pSQLDALen;
+	(*pSQLDA)->sqld = 0;
+	return(0);
+}
+
+/**********************************************************************
+* 函数 : UnionAllocateHostVars
+*	为sqlvar结构申请空间。
+*	返回-1表示申请失败。
+***********************************************************************/
+int UnionAllocateHostVars(SQLDA *pSQLDA)
+{
+	short idx;
+	unsigned int memsize =0;
+	long longmemsize =0;
+	int precision  =0;
+
+	for (idx = 0; idx < pSQLDA->sqld; idx++)
+	{
+		switch (pSQLDA->sqlvar[idx].sqltype )
+		{
+		case SQL_TYP_VARCHAR:
+		case SQL_TYP_NVARCHAR:
+		case SQL_TYP_LONG:
+		case SQL_TYP_NLONG:
+		case SQL_TYP_DATE:
+		case SQL_TYP_NDATE:
+		case SQL_TYP_TIME:
+		case SQL_TYP_NTIME:
+		case SQL_TYP_STAMP:
+		case SQL_TYP_NSTAMP:
+			pSQLDA->sqlvar[idx].sqltype = SQL_TYP_NCSTR;
+			pSQLDA->sqlvar[idx].sqldata = (char *SQL_POINTER)
+				malloc ((pSQLDA->sqlvar[idx].sqllen));
+			memsize = (pSQLDA->sqlvar[idx].sqllen);
+			break;
+		case SQL_TYP_DECIMAL:
+		case SQL_TYP_NDECIMAL:
+			precision = ((char *)&(pSQLDA->sqlvar[idx].sqllen))[0];
+			pSQLDA->sqlvar[idx].sqldata = (char *SQL_POINTER)
+				malloc ((precision + 2) /2);
+			memsize = (precision +2) /2;
+			break;
+		default:
+			pSQLDA->sqlvar[idx].sqldata = (char *SQL_POINTER)
+				malloc (pSQLDA->sqlvar[idx].sqllen);
+			memsize = pSQLDA->sqlvar[idx].sqllen;
+			break;
+		} /* endswitch */
+
+		if (pSQLDA->sqlvar[idx].sqldata == NULL)
+		{
+			return (-1);
+		}
+		else
+		{
+			memset (pSQLDA->sqlvar[idx].sqldata,'\0',memsize);
+		} /* endif */
+
+		/*为sqlind申请空间*/
+		if ( pSQLDA->sqlvar[idx].sqltype & 1 )
+		{
+			/* Allocate storage for short int */
+			pSQLDA->sqlvar[idx].sqlind = (short *)malloc(sizeof(short));
+			/* Detect memory allocation error */
+			if ( pSQLDA->sqlvar[idx].sqlind == NULL )
+			{
+				return(-1) ;
+			}
+			else
+			{
+				/* initialize memory to zero */
+				memset(pSQLDA->sqlvar[idx].sqldata,'\0',sizeof(short));
+			} /* endif */
+		} /* endif */
+	} /* endfor */
+
+	return(0);
+}
+
+/**************************************************************************
+* 函数 : UnionFreeSQLDA
+*	释放SQLDA 申请的空间。
+**************************************************************************/
+void UnionFreeSQLDA(SQLDA *pSQLDA)
+{
+	if (pSQLDA == NULL)
+		return;
+		
+	short idx;
+	for (idx = 0; idx < pSQLDA->sqld; idx++)
+	{
+		if (pSQLDA->sqlvar[idx].sqldata == NULL)
+			continue;
+			
+		free (pSQLDA->sqlvar[idx].sqldata);
+		pSQLDA->sqlvar[idx].sqldata = NULL;
+		if (pSQLDA->sqlvar[idx].sqltype & 1)
+		{
+			if (pSQLDA->sqlvar[idx].sqlind == NULL)
+				continue;
+				
+			free (pSQLDA->sqlvar[idx].sqlind);
+			pSQLDA->sqlvar[idx].sqlind = NULL;
+		}
+	} /* endfor */
+	
+	free (pSQLDA);
+	pSQLDA = NULL;
+}
+
+void UnionFreeOnlySQLDA(SQLDA *pSQLDA)
+{
+	if (pSQLDA == NULL)
+		return;
+	
+	free (pSQLDA);
+	pSQLDA = NULL;
+}
+
+/**************************************************************************
+* 函数 : UnionReadColumnName
+*	返回列名信息
+**************************************************************************/
+char * UnionReadColumnName(SQLDA *pSQLDA,short sqlVarIdx,char *pNameBuf)
+{
+	strncpy(pNameBuf, pSQLDA->sqlvar[sqlVarIdx].sqlname.data,
+		pSQLDA->sqlvar[sqlVarIdx].sqlname.length);
+	return pNameBuf;
+}
+
+/**************************************************************************
+* 函数 : UnionReadColumnValue
+*	返回一行数据
+**************************************************************************/
+char * UnionReadColumnValue(SQLDA *pSQLDA,short sqlVarIdx,char *pValueBuf)
+{
+	short numBytes;
+	short idx, ind ;            /* Array idx variables */
+	/* Variables for decoding packed decimal data */
+	short bottom, point ;
+	unsigned short top, precision, scale;
+	char tmpstr[1024];
+	short pos;
+	short collen;
+	char *dataptr;
+
+	/* 检查是否为null */
+	if ( pSQLDA->sqlvar[sqlVarIdx].sqltype & 1 &&	\
+		*(pSQLDA->sqlvar[sqlVarIdx].sqlind) < 0 )
+	{
+		pValueBuf[0] = 0;
+		return pValueBuf;
+	}
+	dataptr = (char *) pSQLDA->sqlvar[sqlVarIdx].sqldata;
+	collen = pSQLDA->sqlvar[sqlVarIdx].sqllen;
+
+	switch ( pSQLDA->sqlvar[sqlVarIdx].sqltype )
+	{
+	case SQL_TYP_INTEGER:   /* long */
+	case SQL_TYP_NINTEGER:  /* long with null indicator */
+		//sprintf(pValueBuf, "%ld", * ( sqlint32 *) dataptr ) ; modified by 2012-09-07
+		sprintf(pValueBuf, "%d", * ( sqlint32 *) dataptr ) ;
+		break ;
+	case SQL_TYP_SMALL:     /* short */
+	case SQL_TYP_NSMALL:    /* short with null indicator */
+		sprintf(pValueBuf, "%d", * ( short *) dataptr ) ;
+		break ;
+	case SQL_TYP_DECIMAL:   /* decimal */
+	case SQL_TYP_NDECIMAL:  /* decimal with null indicator */
+		/* Determine the scale and precision */
+		precision = ((char *)&(collen))[0];
+		scale = ((char *)&(collen))[1];
+
+		/*************************************************************************
+		*计算精度
+		*************************************************************************/
+		if ((precision %2) == 0) precision += 1;
+
+		/* Calculate the total number of bytes */
+		idx = ( short ) ( precision + 2 ) / 2 ;
+		point = precision - scale ;
+
+		pos = 0;
+		/* Determine the sign */
+		bottom = *(dataptr + idx -1) & 0x000F ;   /* sign */
+		if ( (bottom == 0x000D) || (bottom == 0x000B) ) {
+			pValueBuf[pos++]='-';
+		}
+		/* Decode and print the decimal number */
+		for (pos=0, ind=0; ind < idx; ind++) {
+			top = *(dataptr + ind) & 0x00F0 ;
+			top = (top >> 4 ) ;
+			bottom = *(dataptr + ind) & 0x000F ;
+			if ( point-- == 0 ) pValueBuf[pos++]='.' ;
+			pValueBuf[pos++]='0' + top ;
+			/*************************************************************************/
+			/*忽略最后一位（符号位）                    */
+			/*************************************************************************/
+			if ( ind < idx - 1 ) { /* sign half byte ? */
+				if ( point-- == 0 ) pValueBuf[pos++] = '.';
+				pValueBuf[pos++] = '0'+ bottom;
+			}
+		}
+		pValueBuf[pos] = 0;
+		break ;
+	case SQL_TYP_FLOAT:  /* double */
+	case SQL_TYP_NFLOAT: /* double with null indicator */
+		sprintf(pValueBuf, "%e", * (double *) dataptr) ;
+		break ;
+	case SQL_TYP_CHAR:  /* fixed length character string */
+	case SQL_TYP_NCHAR: /* fixed length character string with null indicator */
+		strncpy(pValueBuf, dataptr, collen);
+		pValueBuf[collen] = 0;
+		collen--;
+		while ((collen >=0) && (pValueBuf[collen] == ' '))
+		{
+			pValueBuf[collen--] = 0;
+		}
+		break;
+	case SQL_TYP_LSTR:  /* varying length character string, 1-byte length */
+	case SQL_TYP_NLSTR: /* varying length character string, 1-byte length, with null indicator */
+		/* Initialize blen to the value the length field in the varchar data structure. */
+		collen = *dataptr;
+		/* Advance the data pointer beyond the length field */
+		dataptr+=sizeof(char);
+		strncpy(pValueBuf, dataptr, collen);
+		pValueBuf[collen] = 0;
+		break ;
+	case SQL_TYP_CSTR:  /* null terminated varying length character string */
+	case SQL_TYP_NCSTR: /* null terminate varying length character string with null indicator */
+		strcpy(pValueBuf,  dataptr);
+		break ;
+	default:
+		pValueBuf[0] = 0;
+	}
+
+	return pValueBuf;
+}
+
+/*
+函数功能：
+连接数据库
+输入参数：
+timeout：超时(秒)，>=0超时时间，<0不设置超时
+输出参数：无
+函数返回：
+0成功，<0失败
+*/
+int UnionConnectDatabaseWithTimeOut(int timeout)
+{
+	int					ret;
+	int					seconds;
+
+	ret			=		0;
+	seconds			=		0;
+
+	memset(DBUserName, 0, sizeof(DBUserName));
+	memset(DBPasswd, 0, sizeof(DBPasswd));
+	memset(DBname, 0, sizeof(DBname));
+	UnionGetDBUSER(DBUserName);
+	UnionGetDBPASSWD(DBPasswd);
+	UnionGetDBNAME(DBname);
+
+	while (1){
+		EXEC SQL CONNECT TO :DBname USER :DBUserName USING :DBPasswd;
+		//EXEC SQL CONNECT TO :gunionDBname;
+		//UNIONCHECKERR("in UnionConnectDatabaseWithTimeOut:: EXEC SQL CONNECT TO");
+		if ((ret = (0 - abs(sqlca.sqlcode))) < 0)
+		{
+			UnionGetDBErrCode();
+			UnionUserErrLog("in UnionConnectDatabaseWithTimeOut:: DBname = [%s] DBUserName = [%s]\n",DBname,DBUserName);
+			UnionUserErrLog("in UnionConnectDatabaseWithTimeOut:: database sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+			if ((timeout >= 0) && (seconds < timeout))
+			{
+				seconds++;
+				sleep(1);
+			}
+			else if ((timeout >= 0) && (seconds >= timeout))
+				break;
+			else
+				sleep(1);
+		}
+		else {
+			return(0);
+		}
+	}
+
+	return(ret);
+}
+
+/*
+函数功能：
+连接数据库
+输入参数：
+
+输出参数：无
+函数返回：
+0成功，<0失败
+*/
+
+int UnionConnectDB()
+{
+	int					ret;
+
+	ret			=		0;
+
+	memset(DBUserName, 0, sizeof(DBUserName));
+	memset(DBPasswd, 0, sizeof(DBPasswd));
+	memset(DBname, 0, sizeof(DBname));
+	UnionGetDBUSER(DBUserName);
+	UnionGetDBPASSWD(DBPasswd);
+	UnionGetDBNAME(DBname);
+
+	if(DBUserName == NULL || strlen(DBUserName) == 0 || DBPasswd == NULL || strlen(DBPasswd) == 0 )
+	{
+		EXEC SQL CONNECT TO :DBname;
+	}
+	else
+	{
+		EXEC SQL CONNECT TO :DBname USER :DBUserName USING :DBPasswd;
+	}
+
+	//UNIONCHECKERR("in UnionConnectDB:: EXEC SQL CONNECT TO");
+	if ((ret = (0 - abs(sqlca.sqlcode))) < 0)
+	{
+		UnionGetDBErrCode();
+		UnionUserErrLog("in UnionConnectDB:: DBname = [%s] DBUserName = [%s] \n",DBname,DBUserName);
+		UnionUserErrLog("in UnionConnectDB:: database sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		//UnionMemLog("tttttttttttttttttttttt", (unsigned char *)(&sqlca.sqlcode), 8);
+		return(ret);
+	}
+
+	return(0);
+}
+
+/*
+函数功能：
+断开连接
+输入参数：无
+输出参数：无
+函数返回：sqlcode
+*/
+
+int UnionCloseDB()
+{
+	int	ret;
+
+	EXEC SQL CONNECT RESET;
+	//UNIONCHECKERR ("EXEC SQL CONNECT RESET");
+
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		ret = UnionGetDBErrCode();
+		UnionUserErrLog("in UnionCloseDB:: EXEC SQL CONNECT RESET sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		return(ret);
+	}
+
+	return(0);
+}
+
+#endif
+
+
+int UnionSelectRealDBRecord(char *tableName,char *field,char *condition,char *record,int sizeOfRecord,char *fileName)
+{
+	int     numOfPerPage=0,currPage=0,isUseNewMech=1;
+	int     beginNum=0,endNum=0;
+	char    tmpStr[20+1];
+	int						ret;
+	int						idx;
+	int						rows;
+	struct sqlda					*pSqlda;
+	struct sqlda					*pSqldaFree;
+	char						strTmpBuf[4096+1];
+	char						strColName[4096+1];
+	char						strColData[4096+1];
+	int						strColDataLen;
+	int						colCount;
+	FILE						*fp;
+	int						recCount;
+	PUnionTableDef					obj = NULL;
+	char						defFldName[100];
+	char						tblFldName[100];
+	int						sqlLen;
+	char						*fieldPtr = NULL;
+	char						tableFileList[512];
+
+	ret				=		-1;
+	idx				=		0;
+	rows				=		0;
+	strColDataLen			=		0;
+	fp				=		NULL;
+	colCount			=		0;
+	recCount			=		0;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sqlSelect[1024+1];
+	char	tmpSql[1024+1];
+	char	recCountStr[8+1];
+	EXEC SQL END DECLARE SECTION;
+
+	// 根据对象名，读取该对象的定义
+	if((obj = UnionFindTableDef(tableName)) == NULL)
+	{
+		ret = UnionSetUserDefinedErrorCode(errCodeParameter);
+		UnionUserErrLog("in UnionSelectRealDBRecord :: tableName = [%s] not found in image!\n", tableName);
+		return(ret);
+	}
+
+	/*
+	UnionProgramerLog("in UnionSelectRealDBRecord:: colCount = [%d]\n",colCount);
+	UnionProgramerLog("in UnionSelectRealDBRecord:: obj.fldNum = [%d]\n",obj.fldNum);
+	for(idx = 0;idx < obj.fldNum;idx++)
+	{
+	UnionProgramerLog("in UnionSelectRealDBRecord:: obj.fldDefGrp[%d].name = [%s]\n",idx,obj.fldDefGrp[idx].name);
+	UnionProgramerLog("in UnionSelectRealDBRecord:: obj.fldDefGrp[%d].size = [%d]\n",idx,obj.fldDefGrp[idx].size);
+	}
+	*/
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionSelectRealDBRecord:: UnionConnectDatabase ret = [%d]\n",ret);
+		return(ret);
+	}
+
+	// add by xusj begin, 2009-07-27
+	memset(tmpStr, 0, sizeof tmpStr);
+	if (UnionReadRecFldFromRecStr(condition,strlen(condition),"currentPage",tmpStr,sizeof(tmpStr)) < 0)
+	{
+		isUseNewMech=0;
+	}
+	else
+	{
+		currPage = atoi(tmpStr);
+	}
+	memset(tmpStr, 0, sizeof tmpStr);
+	if (UnionReadRecFldFromRecStr(condition,strlen(condition),"numOfPerPage",tmpStr,sizeof(tmpStr)) < 0)
+	{
+		isUseNewMech=0;
+	}
+	else
+	{
+		numOfPerPage = atoi(tmpStr);
+	}
+	if (isUseNewMech)
+	{
+		beginNum = (currPage-1)*numOfPerPage;
+		endNum = beginNum + numOfPerPage;
+	}
+
+	//UnionProgramerLog("in UnionSelectRealDBRecord::isUseNewMech=[%d], condition=[%s]\n", isUseNewMech, condition);
+
+	UnionDeleteRecFldFromRecStr(condition,"currentPage");
+	UnionDeleteRecFldFromRecStr(condition,"numOfPerPage");
+	// add by xusj end, 2009-07-27
+
+	// Mod by huangbx begin, 2009/09/04, 分页查询功能
+	if (isUseNewMech)
+	{
+		memset(tmpSql, 0, sizeof tmpSql);
+		memset(recCountStr, 0, sizeof recCountStr);
+		if ((condition == NULL) || (strlen(condition) == 0))
+			sprintf(tmpSql,"select char(count(1)) from %s",tableName);
+		else
+			sprintf(tmpSql,"select char(count(1)) from %s where %s",tableName, condition);
+
+		EXEC SQL PREPARE S FROM :tmpSql;
+		EXEC SQL DECLARE CUR_S CURSOR FOR S;
+		EXEC SQL OPEN CUR_S;
+		EXEC SQL FETCH CUR_S INTO :recCountStr;
+		EXEC SQL CLOSE CUR_S;
+		if (sqlca.sqlcode != 0)
+		{
+			UnionGetDBErrCode(sqlca.sqlcode);
+			UnionUserErrLog("in UnionSelectRealDBRecord:: sql=[%s],errcode=[%d]!\n",tmpSql,sqlca.sqlcode);
+			UnionCloseDatabase();
+			return(UnionSetUserDefinedErrorCode(0-abs(sqlca.sqlcode)));
+		}
+		recCount = atoi(recCountStr);
+		if ( recCount == 0)
+		{
+			UnionLog("in UnionSelectRealDBRecord::count is 0\n");
+			if (fileName != NULL)
+			{
+				if ((fp = fopen(fileName,"w")) == NULL)
+				{
+					return(UnionSetUserDefinedErrorCode(errCodeUseOSErrCode));
+				}
+			}
+			fclose(fp);
+			return(0);
+		}
+
+		memset(sqlSelect,0,sizeof(sqlSelect));
+		if ((condition == NULL) || (strlen(condition) == 0))
+		{
+			if (field[0] != '*')
+				sprintf(sqlSelect, "Select %s from (select A.*, row_number() over() as row_num from %s A) AA "
+				" where AA.row_num > %d and AA.row_num <= %d",
+				field, tableName, beginNum, endNum);
+			else
+				sprintf(sqlSelect, "Select AA.* from (select A.*, row_number() over() as row_num from %s A) AA "
+				" where AA.row_num > %d and AA.row_num <= %d",
+				tableName, beginNum, endNum);
+		}
+		else
+		{
+			if (field[0] != '*')
+				sprintf(sqlSelect, "Select %s from (select A.*, row_number() over() as row_num from %s A where %s) AA "
+				" where AA.row_num > %d and AA.row_num <= %d",
+				field, tableName, condition, beginNum, endNum);
+			else
+				sprintf(sqlSelect, "Select AA.* from (select A.*, row_number() over() as row_num from %s A where %s) AA "
+				" where AA.row_num > %d and AA.row_num <= %d",
+				tableName, condition, beginNum, endNum);
+		}
+	}
+	else {
+		memset(sqlSelect,0,sizeof(sqlSelect));
+		// modified by 2012-06-28
+		/*
+		if ((condition == NULL) || (strlen(condition) == 0))
+			sprintf(sqlSelect,"select %s from %s",field,tableName);
+		else
+			sprintf(sqlSelect,"select %s from %s where %s",field,tableName,condition);
+		*/
+
+		if (strcmp(field, "*") == 0)
+		{
+			//ret = UnionGetTableSelectFieldFromImage(tableName, fieldPtr);
+			memset(tableFileList, 0, sizeof(tableFileList));
+			UnionFormTableFieldList(tableName, tableFileList);
+			fieldPtr = tableFileList;
+			if(strlen(fieldPtr) == 0)
+			{
+				fieldPtr = "*";
+			}
+		}
+		else
+		{
+			fieldPtr = field;
+		}
+		if ((condition == NULL) || (strlen(condition) == 0))
+			sprintf(sqlSelect, "select %s from %s", fieldPtr, tableName);
+		else
+			sprintf(sqlSelect, "select %s from %s where %s",fieldPtr, tableName, condition);
+		// end of modification 2012-06-28
+
+	}
+	// Mod by huangbx end, 2009/09/04
+
+	// 2009/8/10，王纯军增加
+	if ((fileName != NULL) && (strlen(fileName) != 0))
+	{
+		// 20120929 张永定修改,检查是否已经存在order by
+		if (strstr(sqlSelect,"order by") == NULL)
+		{
+			sqlLen = strlen(sqlSelect);
+			strcpy(sqlSelect+sqlLen," order by ");
+			sqlLen += 10;
+			//if ((ret = UnionFormTablePrimaryKeyList(tableName, sqlSelect+sqlLen)) < 0)
+			if ((ret = UnionFormTablePrimaryKeyList(tableName, sqlSelect+sqlLen)) < 0)
+			{
+				UnionUserErrLog("in UnionSelectRealDBRecord:: UnionFormTablePrimaryKeyList ret = [%d]\n",ret);
+				return(ret);
+			}
+		}
+	}
+	// 2009/8/10，王纯军增加结束
+	if (fileName != NULL)
+	{
+		if ((fp = fopen(fileName,"w")) == NULL)
+		{
+			return(UnionSetUserDefinedErrorCode(errCodeUseOSErrCode));
+		}
+	}
+
+	UnionProgramerLog("in UnionSelectRealDBRecord:: sqlSelect = [%s]\n",sqlSelect);
+
+	// 对该SQL语句做PREPARE操作
+	if (UnionInitSQLDA (&pSqlda, 1) < 0)
+	{
+		UnionSystemErrLog("in UnionSelectRealDBRecord:: UnionInitSQLDA 1 error\n");
+		return(UnionSetUserDefinedErrorCode(errCodeUseOSErrCode));
+	}
+	EXEC SQL PREPARE selectCmd from :sqlSelect;
+	if (UNIONCHECKERR ("EXEC SQL PREPARE FROM SELECT SQL") != 0)
+	{
+		ret = (0 - abs(SQLCODE));
+		goto normal_err_exit;
+	}
+
+	// 获得返回结果的描述信息，填入SQLDA结构
+	EXEC SQL DESCRIBE selectCmd INTO :*pSqlda;
+	
+	if (SQLCODE == 100)
+	{
+		UnionProgramerLog("in UnionSelectRealDBRecord:: skiping no record log, sql = [%s]\n", sqlSelect);
+		ret = 0;
+		goto normal_err_exit;
+	}
+
+	// 判断DESCRIBE是否正确执行
+	if (	SQLCODE != 0 &&
+		SQLCODE != SQL_RC_W236 &&
+		SQLCODE != SQL_RC_W237 &&
+		SQLCODE != SQL_RC_W238 &&
+		SQLCODE != SQL_RC_W239	)
+	{
+		if (UNIONCHECKERR ("EXEC SQL DESCRIBE INTO SQLDA") != 0)
+		{
+			ret = (0 - abs(SQLCODE));
+			goto normal_err_exit;
+		}
+	} // end if
+
+	// 如果SQLDA结构中的sqld大于0，则表明是一个SELECT语句，sqld值是列的个数
+	if (pSqlda->sqld > 0)
+	{
+		// 判断是否有LOB列，若是，则需要双倍的SQLDA空间
+		if (strncmp(SQLSTATE, "01005", sizeof(SQLSTATE)) == 0)
+		{
+			// this output contains columns that need a DOUBLED SQLDA ?
+			
+			pSqldaFree = pSqlda;
+			if (UnionInitSQLDA (&pSqlda, pSqlda->sqld * 2) < 0)
+			{
+				UnionSystemErrLog("in UnionSelectRealDBRecord:: UnionInitSQLDA pSqlda->sqld * 2 error pSqlda->sqld = [%ld]\n",pSqlda->sqld);
+				ret = errCodeUseOSErrCode;
+				goto normal_err_exit;
+			}
+			SETSQLDOUBLED (pSqlda, SQLDOUBLED);
+			UnionFreeOnlySQLDA(pSqldaFree);
+		}
+		else
+		{
+			if (pSqlda->sqld > 1)
+			{
+				pSqldaFree = pSqlda;
+				if (UnionInitSQLDA (&pSqlda, pSqlda->sqld) < 0)
+				{
+					UnionSystemErrLog("in UnionSelectRealDBRecord:: UnionInitSQLDA pSqlda->sqld error pSqlda->sqld = [%ld]\n",pSqlda->sqld);
+					ret = errCodeUseOSErrCode;
+					goto normal_err_exit;
+				}
+				UnionFreeOnlySQLDA(pSqldaFree);
+			}
+		}
+
+		// 对SQLDA 重新赋值
+		EXEC SQL DESCRIBE selectCmd INTO :*pSqlda;
+		if (UNIONCHECKERR ("EXEC SQL DESCRIBE INTO SQLDA AGAIN") != 0)
+		{
+			ret = (0 - abs(SQLCODE));
+			goto normal_err_exit;
+		}
+
+		// 给SQLDA分配合适的内存空间
+		if (UnionAllocateHostVars (pSqlda) < 0)
+		{
+			UnionSystemErrLog("in UnionSelectRealDBRecord:: UnionAllocateHostVars error\n");
+			ret = errCodeUseOSErrCode;
+			goto normal_err_exit;
+		}
+
+		colCount = pSqlda->sqld;
+
+		// UnionProgramerLog("in UnionSelectRealDBRecord:: table columns count,pSqlda->sqld = [%d]\n",pSqlda->sqld);
+
+		// 声明游标
+		EXEC SQL DECLARE pCursSelect CURSOR FOR selectCmd;
+		if (UNIONCHECKERR ("EXEC SQL DECLARE CURSOR") != 0)
+		{
+			ret = (0 - abs(SQLCODE));
+			goto normal_err_exit;
+		}
+
+		// 打开游标
+		EXEC SQL OPEN pCursSelect;
+		if (UNIONCHECKERR ("EXEC SQL OPEN CURSOR") != 0)
+		{
+			ret = (0 - abs(SQLCODE));
+			goto normal_err_exit;
+		}
+
+		// 查询一行，存放在SQLDA中
+		EXEC SQL FETCH pCursSelect USING DESCRIPTOR :*pSqlda;
+		UNIONCHECKERR ("EXEC SQL FETCH CURSOR USING DESCRIPTOR INTO SQLDA");
+		if ((ret = (0 - abs(SQLCODE))) < 0)
+		{
+			// 因为界面的所有查询均通过文件传输数据，并判断相应的返回码，
+			//所有sqlcode = 100,返回空文件，并且返回码为0
+			if ((fileName != NULL) && (ret == -100))
+				ret = 0;
+			else if(ret == -100)
+				ret = errCodeDatabaseMDL_RecordNotFound;
+
+			goto cursor_err_exit;
+		}
+
+		// 显示所有的行数据
+		while ( SQLCODE == 0 )
+		{
+			memset(strColData,0,sizeof(strColData));
+			strColDataLen = 0;	// 王纯军增加，2009/6/6
+			for ( idx=0; idx< colCount; idx++)
+			{
+				memset(strTmpBuf,0,sizeof(strTmpBuf));
+				UnionReadColumnValue(pSqlda,idx,strTmpBuf);
+				UnionFilterHeadAndTailBlank(strTmpBuf);
+				// 2009/6/6，王纯军增加
+				memset(defFldName,0,sizeof(defFldName));
+				memset(tblFldName,0,sizeof(tblFldName));
+				UnionReadColumnName(pSqlda,idx,tblFldName);
+				if ((ret = UnionConvertObjectFldName(obj,tblFldName,defFldName)) < 0)
+				{
+					if (ret == errCodeObjectMDL_FieldNotExist)
+						continue;
+					strcpy(defFldName,tblFldName);
+				}
+				if ((ret = UnionPutRecFldIntoRecStr(defFldName,strTmpBuf,strlen(strTmpBuf),strColData+strColDataLen,sizeof(strColData)-strColDataLen)) < 0)
+				{
+					UnionUserErrLog("in UnionSelectRealDBRecord:: UnionPutRecFldIntoRecStr [%s]!\n",defFldName);
+					goto cursor_err_exit;
+				}
+				strColDataLen += ret;
+			}
+
+			rows++;
+
+			//UnionProgramerLog("in UnionSelectRealDBRecord:: now select return rows[%d] = [%s]\n",rows,strColData);
+
+			if (fileName != NULL)
+			{
+				// add by xusj begin, 2009-07-27
+				/* mod by huangbx, 2009/09/04, 注释掉
+				if (isUseNewMech)
+				{
+				if ( (recCount>=beginNum) && (recCount<endNum) )
+				{
+				fputs(strColData,fp);
+				fputs("\n",fp);
+				}
+				}
+				else
+				*/
+
+				{
+					fputs(strColData,fp);
+					fputs("\n",fp);
+				}
+				// add by xusj end, 2009-07-27
+			}
+			else
+			{
+				if (strColDataLen >= sizeOfRecord)
+				{
+					UnionUserErrLog("in UnionSelectRealDBRecord:: sizeOfRecord[%d] <= strColDataLen[%d]\n",sizeOfRecord,strColDataLen);
+					ret = errCodeSmallBuffer;
+					goto cursor_err_exit;
+				}
+				strncpy(record,strColData,strColDataLen);
+				ret = strColDataLen;
+				break;
+			}
+
+			if (!isUseNewMech)
+				recCount++;
+
+			ret = recCount;
+			EXEC SQL FETCH pCursSelect USING DESCRIPTOR :*pSqlda;
+			if(SQLCODE == 100)
+			{
+				UnionProgramerLog("in UnionSelectRealDBRecord:: EXEC SQL FETCH,SQLCODE == 100,select end,now return data rows = [%d]\n",recCount);
+			}
+		}  // endwhile
+
+cursor_err_exit:
+		// 关闭游标
+		EXEC SQL CLOSE pCursSelect;
+		if (UNIONCHECKERR ("EXEC SQL CLOSE CURSOR") != 0)
+		{
+			ret = (0 - abs(SQLCODE));
+		}
+	}
+
+	if (fileName != NULL)
+	{
+		// add by xusj begin, 2009-07-27
+		if (isUseNewMech)
+		{
+			memset(strColData, 0, sizeof strColData);
+			sprintf(strColData, "%s=%d", "totalRecNum", recCount);
+			fputs(strColData,fp);
+		}
+		// add by xusj end, 2009-07-27
+		fflush(fp);
+		fclose(fp);
+	}
+
+	// 释放SQLDA申请的空间
+	UnionFreeSQLDA(pSqlda);
+
+	return(UnionSetUserDefinedErrorCode(ret));
+
+normal_err_exit:
+	if (fileName != NULL)
+	{
+		// add by xusj begin, 2009-07-27
+		if (isUseNewMech)
+		{
+			memset(strColData, 0, sizeof strColData);
+			sprintf(strColData, "%s=%d", "totalRecNum", recCount);
+			fputs(strColData,fp);
+		}
+		// add by xusj end, 2009-07-27
+		fflush(fp);
+		fclose(fp);
+	}
+
+	// 释放SQLDA申请的空间
+	UnionFreeSQLDA(pSqlda);
+
+	return(UnionSetUserDefinedErrorCode(ret));
+}
+
+int UnionUpdateRealDBRecord(char *tableName,char *field,char *condition)
+{
+	int	ret;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sqlUpdate[8192*2+1];
+	EXEC SQL END DECLARE SECTION;
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionUpdateRealDBRecord:: UnionConnectDatabase ret = [%d]\n",ret);
+		return(ret);
+	}
+
+	memset(sqlUpdate,0,sizeof(sqlUpdate));
+	if ((condition == NULL) || (strlen(condition) == 0))
+		sprintf(sqlUpdate,"update %s set %s",tableName,field);
+	else
+		sprintf(sqlUpdate,"update %s set %s where %s",tableName,field,condition);
+
+	UnionProgramerLog("in UnionUpdateRealDBRecord:: sqlUpdate = [%s]\n",sqlUpdate);
+
+	EXEC SQL EXECUTE IMMEDIATE :sqlUpdate;
+
+	if (sqlca.sqlcode == 100)
+	{
+		UnionProgramerLog("in UnionUpdateRealDBRecord:: skiping no record log, sql = [%s]\n", sqlUpdate);
+		return(0);
+	}
+
+	UNIONCHECKERR ("EXEC SQL EXECUTE IMMEDIATE UPDATE SQL");
+	if ((ret = (0 - abs(SQLCODE))) < 0)
+	{
+		EXEC SQL ROLLBACK;
+		UNIONCHECKERR ("EXEC SQL EXECUTE IMMEDIATE UPDATE SQL ERROR,EXEC SQL ROLLBACK");
+		UnionGetDBErrCode(SQLCODE);
+		UnionUserErrLog("in UnionUpdateRealDBRecord:: sqlUpdate = [%s]!\n",sqlUpdate);
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	EXEC SQL COMMIT;
+	UNIONCHECKERR ("EXEC SQL COMMIT UPDATE SQL");
+	if ((ret = (0 - abs(SQLCODE))) < 0)
+	{
+		EXEC SQL ROLLBACK;
+		UNIONCHECKERR ("EXEC SQL COMMIT UPDATE SQL ERROR,EXEC SQL ROLLBACK");
+		UnionGetDBErrCode(SQLCODE);
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	return(0);
+}
+
+int UnionInsertRealDBRecord(char *tableName,char *record,int lenOfRecord)
+{
+	int	ret;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sqlInsert[8192*3+1];
+	EXEC SQL END DECLARE SECTION;
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionInsertRealDBRecord:: UnionConnectDatabase ret = [%d]\n",ret);
+		return(ret);
+	}
+
+	memset(sqlInsert,0,sizeof(sqlInsert));
+	if (strlen(record) + strlen(tableName) + strlen("insert into ") + 1 >= sizeof(sqlInsert))
+	{
+		UnionUserErrLog("in UnionInsertRealDBRecord:: sizeOfBuf too small for [%s] [%s]\n",tableName,record);
+		return(UnionSetUserDefinedErrorCode(errCodeSmallBuffer));
+	}
+	sprintf(sqlInsert,"insert into %s %s",tableName,record);
+
+	UnionProgramerLog("in UnionInsertRealDBRecord:: sqlInsert = [%s]\n",sqlInsert);
+
+	EXEC SQL EXECUTE IMMEDIATE :sqlInsert;
+	UNIONCHECKERR ("EXEC SQL EXECUTE IMMEDIATE INSERT SQL");
+	if ((ret = (0 - abs(SQLCODE))) < 0)
+	{
+		EXEC SQL ROLLBACK;
+		UNIONCHECKERR ("EXEC SQL EXECUTE IMMEDIATE INSERT SQL ERROR,EXEC SQL ROLLBACK");
+		UnionCloseDatabase();
+		UnionGetDBErrCode(SQLCODE);
+		if (ret == -803)
+			ret = errCodeObjectMDL_PrimaryKeyIsRepeat;
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	EXEC SQL COMMIT;
+	UNIONCHECKERR ("EXEC SQL COMMIT INSERT SQL");
+	if ((ret = (0 - abs(SQLCODE))) < 0)
+	{
+		EXEC SQL ROLLBACK;
+		UNIONCHECKERR ("EXEC SQL COMMIT INSERT SQL ERROR,EXEC SQL ROLLBACK");
+		UnionCloseDatabase();
+		UnionGetDBErrCode(SQLCODE);
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	return(0);
+}
+
+int UnionDeleteRealDBRecord(char *tableName,char *condition)
+{
+	int	ret;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sqlDelete[1024+1];
+	EXEC SQL END DECLARE SECTION;
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionDeleteRealDBRecord:: UnionConnectDatabase ret = [%d]\n",ret);
+		return(ret);
+	}
+
+	memset(sqlDelete,0,sizeof(sqlDelete));
+	if ( (condition == NULL) || (strlen(condition) == 0))
+		sprintf(sqlDelete,"delete from %s",tableName);
+	else
+		sprintf(sqlDelete,"delete from %s where %s",tableName,condition);
+
+	EXEC SQL EXECUTE IMMEDIATE :sqlDelete;
+
+	UnionProgramerLog("in UnionDeleteRealDBRecord:: sqlDelete = [%s]\n",sqlDelete);
+	if (SQLCODE == 100)
+	{
+		UnionProgramerLog("in UnionDeleteRealDBRecord:: skiping no record log, sql = [%s]\n", sqlDelete);
+		return(0);
+	}
+
+	UNIONCHECKERR ("EXEC SQL EXECUTE IMMEDIATE DELETE SQL");
+	if ((ret = (0 - abs(SQLCODE))) < 0)
+	{
+		EXEC SQL ROLLBACK;
+		UNIONCHECKERR ("EXEC SQL EXECUTE IMMEDIATE DELETE SQL ERROR,EXEC SQL ROLLBACK");
+		UnionCloseDatabase();
+		UnionGetDBErrCode(SQLCODE);
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	EXEC SQL COMMIT;
+	UNIONCHECKERR ("EXEC SQL COMMIT DELETE SQL");
+	if ((ret = (0 - abs(SQLCODE))) < 0)
+	{
+		EXEC SQL ROLLBACK;
+		UNIONCHECKERR ("EXEC SQL COMMIT DELETE SQL ERROR,EXEC SQL ROLLBACK");
+		UnionCloseDatabase();
+		UnionGetDBErrCode(SQLCODE);
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	return(0);
+}
+
+int UnionExecRealDBSql(char *sql)
+{
+	int	ret;
+	int	cnt;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sqlStr[1024*2+1];
+	EXEC SQL END DECLARE SECTION;
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionLog("in UnionExecRealDBSql:: UnionConnectDatabase ret = [%d]\n",ret);
+		return(ret);
+	}
+
+	memset(sqlStr, 0, sizeof(sqlStr));
+	strcpy(sqlStr, sql);
+
+	EXEC SQL EXECUTE IMMEDIATE :sqlStr;
+	UNIONCHECKERR("in UnionExecRealDBSql:: EXEC SQL EXECUTE IMMEDIATE :sqlStr");
+
+	if (sqlca.sqlcode == 100)
+	{
+		EXEC SQL COMMIT;
+		return 0;
+	}
+
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		UnionGetDBErrCode(sqlca.sqlcode);
+		UnionUserErrLog("in UnionExecRealDBSql:: EXECUTE IMMEDIATE sqlca.sqlcode = [%d]\n",sqlca.sqlcode);
+		UnionUserErrLog("in UnionExecRealDBSql:: sqlStr = [%s]\n",sqlStr);
+		EXEC SQL ROLLBACK;
+		UNIONCHECKERR ("in UnionExecRealDBSql:: EXEC SQL ROLLBACK");
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	cnt = sqlca.sqlerrd[2];
+	UnionProgramerLog("in UnionExecRealDBSql::cnt=[%d]\n", cnt);
+
+	EXEC SQL COMMIT;
+	UNIONCHECKERR ("in UnionExecRealDBSql:: EXEC SQL COMMIT");
+	if (ret = 0 - abs(sqlca.sqlcode))
+	{
+		UnionGetDBErrCode(sqlca.sqlcode);
+		UnionUserErrLog("in UnionExecRealDBSql:: sqlStr = [%s]\n", sqlStr);
+		UnionUserErrLog("in UnionExecRealDBSql:: EXEC SQL COMMIT sqlca.sqlcode = [%d]\n", sqlca.sqlcode);
+		//UnionUserErrLog("in UnionExecRealDBSql:: sqlca.sqlerrmc[%s]\n",sqlca.sqlerrmc);
+		EXEC SQL ROLLBACK;
+		UNIONCHECKERR("in UnionExecRealDBSql:: EXEC SQL ROLLBACK");
+		UnionCloseDatabase();
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	return(cnt);
+}
+
+// Add By HuangBaoxin, 20091015
+int UnionOpenRealDBSql(char *sql, char *record, int sizeOfRecord)
+{
+	int		ret, idx, colCount;
+	//char		strFldName[128+1], strTmpBuf[1024+1]; 
+	char		strFldName[128+1], strTmpBuf[4096+1]; 
+	struct sqlda	*pSqlda;
+	struct sqlda	*pSqldaFree;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	sqlOpenSelect[1024+1];
+	EXEC SQL END DECLARE SECTION;
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionLog("in UnionOpenRealDBSql:: UnionConnectDatabase!\n");
+		return(ret);
+	}
+
+	memset(sqlOpenSelect, 0, sizeof(sqlOpenSelect));
+	strcpy(sqlOpenSelect, sql);
+
+	EXEC SQL PREPARE openSelectCmd from :sqlOpenSelect;
+	if (UNIONCHECKERR ("in UnionOpenRealDBSql:: EXEC SQL PREPARE openSelectCmd from :sqlOpenSelect") != 0)
+	{
+		ret = 0 - abs(sqlca.sqlcode);
+		return(UnionSetUserDefinedErrorCode(ret));
+	}
+
+	// 获得返回结果的描述信息，填入SQLDA结构
+	if (UnionInitSQLDA(&pSqlda, 1) < 0)
+	{
+		UnionSystemErrLog("in UnionOpenRealDBSql:: UnionInitSQLDA 1 error\n");
+		return(UnionSetUserDefinedErrorCode(errCodeUseOSErrCode));
+	}
+	EXEC SQL DESCRIBE openSelectCmd INTO :*pSqlda;
+	if (sqlca.sqlcode == 100)
+	{
+		UnionProgramerLog("in UnionOpenRealDBSql:: skiping no record log, sql = [%s]\n", sqlOpenSelect);
+		return(0);
+	}
+
+	// 判断DESCRIBE是否正确执行
+	if (	SQLCODE != 0 && 
+		SQLCODE != SQL_RC_W236 &&
+		SQLCODE != SQL_RC_W237 &&
+		SQLCODE != SQL_RC_W238 &&
+		SQLCODE != SQL_RC_W239	) 
+	{
+		if (UNIONCHECKERR("in UnionOpenRealDBSql:: EXEC SQL DESCRIBE openSelectCmd INTO :*pSqlda") != 0)
+		{
+			ret = 0 - abs(sqlca.sqlcode);
+			goto normal_error_exit;
+		}
+	} // end if
+
+	// 如果SQLDA结构中的sqld大于0，则表明是一个SELECT语句，sqld值是列的个数
+	if (pSqlda->sqld > 0) 
+	{ 
+		// 判断是否有LOB列，若是，则需要双倍的SQLDA空间
+		if (strncmp(SQLSTATE, "01005", sizeof(SQLSTATE)) == 0) 
+		{
+			// this output contains columns that need a DOUBLED SQLDA ?
+			
+			// 释放SQLDA申请的空间
+			pSqldaFree = pSqlda;
+			if (UnionInitSQLDA(&pSqlda, pSqlda->sqld * 2) < 0)
+			{
+				UnionSystemErrLog("in UnionOpenRealDBSql:: UnionInitSQLDA pSqlda->sqld * 2 error pSqlda->sqld = [%ld]\n",pSqlda->sqld);
+				ret = errCodeUseOSErrCode;
+				goto normal_error_exit;
+			}
+			SETSQLDOUBLED(pSqlda, SQLDOUBLED);
+			UnionFreeOnlySQLDA(pSqldaFree);
+		} 
+		else
+		{
+			if (pSqlda->sqld > 1)
+			{
+				pSqldaFree = pSqlda;
+				if (UnionInitSQLDA (&pSqlda, pSqlda->sqld) < 0)
+				{
+					UnionSystemErrLog("in UnionOpenRealDBSql:: UnionInitSQLDA pSqlda->sqld error pSqlda->sqld = [%ld]\n",pSqlda->sqld);
+					ret = errCodeUseOSErrCode;
+					goto normal_error_exit;
+				}
+				UnionFreeOnlySQLDA(pSqldaFree);
+			}
+		}
+
+		// 对SQLDA 重新赋值
+		EXEC SQL DESCRIBE openSelectCmd INTO :*pSqlda;
+		if (UNIONCHECKERR ("in UnionOpenRealDBSql:: EXEC SQL DESCRIBE selectCmd INTO :*pSqlda") != 0)
+		{
+			ret = 0 - abs(sqlca.sqlcode);
+			goto normal_error_exit;
+		}
+
+		// 给SQLDA分配合适的内存空间
+		if (UnionAllocateHostVars (pSqlda) < 0)
+		{
+			UnionSystemErrLog("in UnionOpenRealDBSql:: UnionAllocateHostVars error\n");
+			ret = errCodeUseOSErrCode;
+			goto normal_error_exit;
+		}
+		colCount = pSqlda->sqld;
+		//UnionLog("in UnionOpenRealDBSql:: colCount = [%d]\n",colCount);
+
+		// 声明游标
+		EXEC SQL DECLARE pCursOpenSelect CURSOR FOR openSelectCmd;
+		if (UNIONCHECKERR ("in UnionOpenRealDBSql:: EXEC SQL DECLARE pCursOpenSelect CURSOR FOR selectSqlCmd") != 0)
+		{
+			ret = 0 - abs(sqlca.sqlcode);
+			goto normal_error_exit;
+		}
+
+		// 打开游标
+		EXEC SQL OPEN pCursOpenSelect; 
+		if (UNIONCHECKERR ("in UnionOpenRealDBSql:: EXEC SQL OPEN pCursOpenSelect") != 0)
+		{
+			ret = 0 - abs(sqlca.sqlcode);
+			goto cursor_error_exit;
+		}
+
+		// 查询一行，存放在SQLDA中
+		EXEC SQL FETCH pCursOpenSelect USING DESCRIPTOR :*pSqlda; 
+		if (sqlca.sqlcode == 100)
+		{
+			ret = 0;
+			UnionAuditLog("in UnionOpenRealDBSql:: sql = [%s] recode not found!!\n", sql);
+			EXEC SQL CLOSE pCursOpenSelect; 
+			goto normal_error_exit;
+		}
+		if (UNIONCHECKERR ("in UnionOpenRealDBSql:: EXEC SQL FETCH pCursOpenSelect USING DESCRIPTOR :*pSqlda") != 0)
+		{
+			ret = 0 - abs(sqlca.sqlcode);
+			goto cursor_error_exit;
+		}
+
+		for ( idx = 0; idx < colCount; idx++)      
+		{
+			memset(strTmpBuf, 0, sizeof(strTmpBuf));
+			UnionReadColumnValue(pSqlda, idx, strTmpBuf);
+
+			memset(strFldName, 0, sizeof(strFldName));
+			sprintf(strFldName, "FIELD%d", idx);
+
+			if ( (ret = UnionPutRecFldIntoRecStr(strFldName, strTmpBuf, strlen(strTmpBuf),
+				record + strlen(record), sizeOfRecord - strlen(record))) < 0 )
+			{
+				UnionUserErrLog("in UnionOpenRealDBSql:: UnionPutRecFldIntoRecStr [%s]!\n",strFldName);
+				goto cursor_error_exit;
+			}
+		}
+
+		// 关闭游标
+		EXEC SQL CLOSE pCursOpenSelect; 
+		if (UNIONCHECKERR ("in UnionOpenRealDBSql:: EXEC SQL CLOSE pCursOpenSelect") != 0)
+		{
+			ret = 0 - abs(sqlca.sqlcode);
+			goto normal_error_exit;
+		}
+	} 
+cursor_error_exit:
+	EXEC SQL CLOSE pCursOpenSelect;
+
+	// 释放SQLDA申请的空间
+	UnionFreeSQLDA(pSqlda);
+	return(UnionSetUserDefinedErrorCode(ret));
+
+normal_error_exit:
+
+	// 释放SQLDA申请的空间
+	UnionFreeSQLDA(pSqlda);
+
+	return(UnionSetUserDefinedErrorCode(ret));	
+}
+
+int UnionSelectDBRecordByRealSQL(char *tableName, char *sql, char *record, int sizeOfRecord, char *fileName)
+{
+	char    tmpStr[20+1];
+	int						ret;
+	int						idx;
+	int						rows;
+	struct sqlda					*pSqlda;
+	struct sqlda					*pSqldaFree;
+	char						strTmpBuf[4096+1];
+	char						strColName[4096+1];
+	char						strColData[4096+1];
+	int						strColDataLen;
+	int						colCount;
+	FILE						*fp;
+	int						recCount;
+	PUnionTableDef					obj = NULL;
+	char						defFldName[100];
+	char						tblFldName[100];
+
+	ret				=		-1;
+	idx				=		0;
+	rows				=		0;
+	strColDataLen			=		0;
+	fp				=		NULL;
+	colCount			=		0;
+	recCount			=		0;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char	tmpRealSql[1024+1];
+	char	realsqlSelect[1024+1];
+	char	realRecCountStr[8+1];
+	EXEC SQL END DECLARE SECTION;
+
+	memset(&obj,0,sizeof(obj));
+	// 根据对象名，读取该对象的定义
+	if((obj = UnionFindTableDef(tableName)) == NULL)
+	{
+		ret = UnionSetUserDefinedErrorCode(errCodeParameter);
+		UnionUserErrLog("UnionSelectDBRecordByRealSQL :: tableName = [%s] not found in image!\n", tableName);
+		return(ret);
+	}
+
+	if ((ret = UnionConnectDatabase()) < 0)
+	{
+		UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: UnionConnectDatabase ret = [%d]\n",ret);
+		return(ret);
+	}
+
+	if (fileName != NULL)
+	{
+		if ((fp = fopen(fileName,"w")) == NULL)
+		{
+			return(UnionSetUserDefinedErrorCode(errCodeUseOSErrCode));
+		}
+	}
+
+	strcpy(realsqlSelect, sql);
+	UnionProgramerLog("in UnionSelectDBRecordByRealSQL:: sql = [%s]\n",realsqlSelect);
+
+	// 对该SQL语句做PREPARE操作
+	if (UnionInitSQLDA (&pSqlda, 1) < 0)
+	{
+		UnionSystemErrLog("in UnionSelectDBRecordByRealSQL:: UnionInitSQLDA 1 error\n");
+		return(UnionSetUserDefinedErrorCode(errCodeUseOSErrCode));
+	}
+	EXEC SQL PREPARE realSelectCmd from :realsqlSelect;
+	if (UNIONCHECKERR ("EXEC SQL PREPARE FROM SELECT SQL") != 0)
+	{
+		ret = (0 - abs(SQLCODE));
+		goto normal_err_exit;
+	}
+
+	// 获得返回结果的描述信息，填入SQLDA结构
+	EXEC SQL DESCRIBE realSelectCmd INTO :*pSqlda;
+
+	// 判断DESCRIBE是否正确执行
+	if (	SQLCODE != 0 &&
+		SQLCODE != SQL_RC_W236 &&
+		SQLCODE != SQL_RC_W237 &&
+		SQLCODE != SQL_RC_W238 &&
+		SQLCODE != SQL_RC_W239	)
+	{
+		if (UNIONCHECKERR ("EXEC SQL DESCRIBE INTO SQLDA") != 0)
+		{
+			ret = (0 - abs(SQLCODE));
+			goto normal_err_exit;
+		}
+	} // end if
+
+	// 如果SQLDA结构中的sqld大于0，则表明是一个SELECT语句，sqld值是列的个数
+	if (pSqlda->sqld > 0)
+	{
+		// 判断是否有LOB列，若是，则需要双倍的SQLDA空间
+		if (strncmp(SQLSTATE, "01005", sizeof(SQLSTATE)) == 0)
+		{
+			// this output contains columns that need a DOUBLED SQLDA ?
+			
+			pSqldaFree = pSqlda;
+			if (UnionInitSQLDA (&pSqlda, pSqlda->sqld * 2) < 0)
+			{
+				UnionSystemErrLog("in UnionSelectDBRecordByRealSQL:: UnionInitSQLDA pSqlda->sqld * 2 error pSqlda->sqld = [%ld]\n",pSqlda->sqld);
+				ret = errCodeUseOSErrCode;
+				goto normal_err_exit;
+			}
+			SETSQLDOUBLED (pSqlda, SQLDOUBLED);
+			UnionFreeOnlySQLDA(pSqldaFree);
+		}
+		else
+		{
+			if (pSqlda->sqld > 1)
+			{
+				pSqldaFree = pSqlda;
+				if (UnionInitSQLDA (&pSqlda, pSqlda->sqld) < 0)
+				{
+					UnionSystemErrLog("in UnionSelectDBRecordByRealSQL:: UnionInitSQLDA pSqlda->sqld error pSqlda->sqld = [%ld]\n",pSqlda->sqld);
+					ret = errCodeUseOSErrCode;
+					goto normal_err_exit;
+				}
+				UnionFreeOnlySQLDA(pSqldaFree);
+			}
+		}
+
+		// 对SQLDA 重新赋值
+		EXEC SQL DESCRIBE realSelectCmd INTO :*pSqlda;
+		if (UNIONCHECKERR ("EXEC SQL DESCRIBE INTO SQLDA AGAIN") != 0)
+		{
+			ret = (0 - abs(SQLCODE));
+			goto normal_err_exit;
+		}
+
+		// 给SQLDA分配合适的内存空间
+		if (UnionAllocateHostVars (pSqlda) < 0)
+		{
+			UnionSystemErrLog("in UnionSelectDBRecordByRealSQL:: UnionAllocateHostVars error\n");
+			ret = errCodeUseOSErrCode;
+			goto normal_err_exit;
+		}
+
+		colCount = pSqlda->sqld;
+
+		UnionProgramerLog("in UnionSelectDBRecordByRealSQL:: table columns count,pSqlda->sqld = [%d]\n",pSqlda->sqld);
+
+		// 声明游标
+		EXEC SQL DECLARE pCursRealSelect CURSOR FOR realSelectCmd;
+		if (UNIONCHECKERR ("EXEC SQL DECLARE CURSOR") != 0)
+		{
+			ret = (0 - abs(SQLCODE));
+			goto normal_err_exit;
+		}
+
+		// 打开游标
+		EXEC SQL OPEN pCursRealSelect;
+		if (UNIONCHECKERR ("EXEC SQL OPEN CURSOR") != 0)
+		{
+			ret = (0 - abs(SQLCODE));
+			goto normal_err_exit;
+		}
+
+		// 查询一行，存放在SQLDA中
+		EXEC SQL FETCH pCursRealSelect USING DESCRIPTOR :*pSqlda;
+		UNIONCHECKERR ("EXEC SQL FETCH CURSOR USING DESCRIPTOR INTO SQLDA");
+		if ((ret = (0 - abs(SQLCODE))) < 0)
+		{
+			// 因为界面的所有查询均通过文件传输数据，并判断相应的返回码，
+			//所有sqlcode = 100,返回空文件，并且返回码为0
+			if ((fileName != NULL) && (ret == -100))
+				ret = 0;
+			else if(ret == -100)
+				ret = errCodeDatabaseMDL_RecordNotFound;
+
+			goto cursor_err_exit;
+		}
+
+		// 显示所有的行数据
+		while ( SQLCODE == 0 )
+		{
+			memset(strColData,0,sizeof(strColData));
+			strColDataLen = 0;	// 王纯军增加，2009/6/6
+			for ( idx=0; idx< colCount; idx++)
+			{
+				memset(strTmpBuf,0,sizeof(strTmpBuf));
+				UnionReadColumnValue(pSqlda,idx,strTmpBuf);
+				UnionFilterHeadAndTailBlank(strTmpBuf);
+				// 2009/6/6，王纯军增加
+				memset(defFldName,0,sizeof(defFldName));
+				memset(tblFldName,0,sizeof(tblFldName));
+				UnionReadColumnName(pSqlda,idx,tblFldName);
+				if ((ret = UnionConvertObjectFldName(obj,tblFldName,defFldName)) < 0)
+				{
+					if (ret == errCodeObjectMDL_FieldNotExist)
+					{
+						strcpy(defFldName,tblFldName);
+					}
+					else
+					{
+						continue;
+					}
+				}
+				if ((ret = UnionPutRecFldIntoRecStr(defFldName,strTmpBuf,strlen(strTmpBuf),strColData+strColDataLen,sizeof(strColData)-strColDataLen)) < 0)
+				{
+					UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: UnionPutRecFldIntoRecStr [%s]!\n",defFldName);
+					goto cursor_err_exit;
+				}
+				strColDataLen += ret;
+			}
+
+			rows++;
+
+			//UnionProgramerLog("in UnionSelectDBRecordByRealSQL:: now select return rows[%d] = [%s]\n",rows,strColData);
+
+			if (fileName != NULL)
+			{
+				// add by xusj begin, 2009-07-27
+				/* mod by huangbx, 2009/09/04, 注释掉
+				if (isUseNewMech)
+				{
+				if ( (recCount>=beginNum) && (recCount<endNum) )
+				{
+				fputs(strColData,fp);
+				fputs("\n",fp);
+				}
+				}
+				else
+				*/
+
+				{
+					fputs(strColData,fp);
+					fputs("\n",fp);
+				}
+				// add by xusj end, 2009-07-27
+			}
+			else
+			{
+				if (strColDataLen >= sizeOfRecord)
+				{
+					UnionUserErrLog("in UnionSelectDBRecordByRealSQL:: sizeOfRecord[%d] <= strColDataLen[%d]\n",sizeOfRecord,strColDataLen);
+					ret = errCodeSmallBuffer;
+					goto cursor_err_exit;
+				}
+				strncpy(record,strColData,strColDataLen);
+				ret = strColDataLen;
+				break;
+			}
+
+			recCount++;
+
+			ret = recCount;
+			EXEC SQL FETCH pCursRealSelect USING DESCRIPTOR :*pSqlda;
+			if(SQLCODE == 100)
+			{
+				UnionProgramerLog("in UnionSelectDBRecordByRealSQL:: EXEC SQL FETCH,SQLCODE == 100,select end,now return data rows = [%d]\n",recCount);
+			}
+		}  // endwhile
+
+cursor_err_exit:
+		// 关闭游标
+		EXEC SQL CLOSE pCursRealSelect;
+		if (UNIONCHECKERR ("EXEC SQL CLOSE CURSOR") != 0)
+		{
+			ret = (0 - abs(SQLCODE));
+		}
+	}
+
+	if (fileName != NULL)
+	{
+		fflush(fp);
+		fclose(fp);
+	}
+
+	// 释放SQLDA申请的空间
+	UnionFreeSQLDA(pSqlda);
+
+	return(UnionSetUserDefinedErrorCode(ret));
+
+normal_err_exit:
+	if (fileName != NULL)
+	{
+		fflush(fp);
+		fclose(fp);
+	}
+
+	// 释放SQLDA申请的空间
+	UnionFreeSQLDA(pSqlda);
+
+	return(UnionSetUserDefinedErrorCode(ret));
+}
+
+int UnionSelectRealDBRecordCounts(char *tableName,char *condition)
+{
+        char    tmpStr[20+1];
+        int     i;
+        int     ret;
+        int     sqlLen;
+        FILE    *fp;
+        int	count;
+
+        memset(tmpStr, 0, sizeof tmpStr);
+
+        EXEC SQL BEGIN DECLARE SECTION;
+        char     countStr[32];
+        char    sql[8192+1];
+        char    v_tableName[128];
+        EXEC SQL END DECLARE SECTION;
+
+
+        if ((ret = UnionConnectDatabase()) < 0)
+        {
+                UnionUserErrLog("in UnionSelectRealDBRecordCounts:: UnionConnectDatabase!\n");
+                return(ret);
+        }
+
+        memset(sql, 0, sizeof sql);
+        if ((condition == NULL) || (strlen(condition) == 0))
+                sprintf(sql,"select count(1) from %s",tableName);
+        else
+                sprintf(sql,"select count(1) from %s where %s",tableName, condition);
+	
+	memset(countStr,0,sizeof(countStr));
+	
+        EXEC SQL PREPARE S_1 FROM :sql;
+        EXEC SQL DECLARE CUR_S_1 CURSOR FOR S_1;
+        EXEC SQL OPEN CUR_S_1;
+        EXEC SQL FETCH CUR_S_1 INTO :countStr;
+        EXEC SQL CLOSE CUR_S_1;
+        if (sqlca.sqlcode != 0)
+        {
+                UnionUserErrLog("in UnionSelectRealDBRecordCounts:: sql=[%s],errcode=[%d]!\n",sql,sqlca.sqlcode);
+                UnionCloseDatabase();
+                return(UnionSetUserDefinedErrorCode(0-abs(sqlca.sqlcode)));
+        }
+        count = atoi(countStr);
+        UnionCloseDatabase();
+        return(count);
+}
+
+int UnionSelectOneFieldBySQL(char *fldDescription, char *tableName, char *condition, int lenOfResultBuf, char *resultBuf)
+{       
+	int                     ret;            
+
+        
+	char                    sql[2048];
+	char                    result[4096];
+        
+	memset(sql, 0, sizeof(sql));
+	memset(result, 0, sizeof(result));
+
+	if(condition == NULL || strlen(condition) == 0)
+	{
+		sprintf(sql, "select %s from %s", fldDescription, tableName);
+	}
+	else
+	{
+		sprintf(sql, "select %s from %s where %s", fldDescription, tableName, condition);
+	}
+	UnionProgramerLog("in UnionSelectOneFieldBySQL:: excute sql = [%s]!\n", sql);
+                        
+        strncpy(resultBuf, result, lenOfResultBuf);
+
+	if ((ret = UnionOpenRealDBSql(sql, result, sizeof(result))) < 0)
+	{
+		UnionUserErrLog("in UnionSelectOneFieldBySQL:: UnionOpenRealDBSql sql=[%s] return=%d Error\n", sql, ret);
+		return(ret);
+	}
+        UnionRTrim(result);
+
+	if ((ret = UnionReadRecFldFromRecStr(result, strlen(result), "FIELD0", resultBuf, lenOfResultBuf) < 0))
+	{
+		UnionUserErrLog("in UnionSelectOneFieldBySQL:: UnionReadRecFldFromRecStr fld = %s ret = %d error !\n","FIELD0", ret);
+		return(ret);
+	}
+	return(ret);
+}
+
+/*
+函数功能：
+删除空格
+输入参数：
+str:	字符串
+输出参数：
+str:	字符串
+函数返回：
+*/
+void UnionDeleteSpace(char *str)
+{
+	char *p_head, *p_find, *p_tmp;
+	p_head = str;
+	p_find = str;
+
+	while ((p_find != NULL) && (*p_find != 0))
+	{
+		if (*p_find == ' ')
+		{
+			p_tmp = p_find;
+			p_find++;
+			*p_tmp = 0;
+			strcat(p_head, p_find);
+			p_find = p_head;
+		}
+		else
+			p_find++;
+	}
+}
+// Add By Huangbaoxin, 2009/10/09
+char *UnionGetDBUserName()
+{
+	return DBUserName;
+}
+
+/*
+int UnionGetDBSequenceValueOfICCardID(char *certID)
+{
+
+	int		ret;
+
+        EXEC SQL BEGIN DECLARE SECTION;
+	sqlint32	seqNo;
+        EXEC SQL END DECLARE SECTION;
+
+        if ((ret = UnionConnectDatabase()) < 0)
+        {
+                UnionUserErrLog("in UnionGetDBSequenceValueOfICCardID:: UnionConnectDatabase ret = %d!\n", ret);
+                return(ret);
+        }
+
+	EXEC SQL VALUES NEXT VALUE FOR kms_iccard_id INTO :seqNo;
+	if(sqlca.sqlcode == -805)
+	{
+		UnionAuditLog("in UnionGetDBSequenceValueOfICCardID:: db Sequence kms_iccard_id not defined!\n");
+                return(UnionSetUserDefinedErrorCode(errCodeObjectMDL_ObjectDefinitionNotExists)); // Sequence没有定义时返回值为不在区间
+	}
+        if(sqlca.sqlcode != 0)
+        {
+                UnionUserErrLog("in UnionGetDBSequenceValueOfICCardID:: EXEC SQL VALUES NEXT VALUE FOR kms_iccard_id, errcode=[%d]!\n", sqlca.sqlcode);
+                return(UnionSetUserDefinedErrorCode(0-abs(sqlca.sqlcode)));
+        }
+	
+	sprintf(certID, "%06X", seqNo);
+
+	UnionProgramerLog("in UnionGetDBSequenceValueOfICCardID:: certID = [%s]!\n", certID);
+
+	return(6);
+	
+}
+
+int UnionGetCurrentDBSequenceValueOfICCardID(char *certID)
+{
+
+	int		ret;
+
+        EXEC SQL BEGIN DECLARE SECTION;
+	sqlint32	seqNo;
+        EXEC SQL END DECLARE SECTION;
+
+        if ((ret = UnionConnectDatabase()) < 0)
+        {
+                UnionUserErrLog("in UnionGetCurrentDBSequenceValueOfICCardID:: UnionConnectDatabase ret = %d!\n", ret);
+                return(ret);
+        }
+
+	EXEC SQL VALUES PREVVAL FOR kms_iccard_id INTO :seqNo;
+	if(sqlca.sqlcode == -805)
+	{
+		UnionAuditLog("in UnionGetCurrentDBSequenceValueOfICCardID:: db Sequence kms_iccard_id not defined!\n");
+                return(UnionSetUserDefinedErrorCode(errCodeObjectMDL_ObjectDefinitionNotExists)); // Sequence没有定义时返回值为不在区间
+	}
+        if(sqlca.sqlcode != 0)
+        {
+                UnionUserErrLog("in UnionGetCurrentDBSequenceValueOfICCardID:: EXEC SQL VALUES NEXT VALUE FOR kms_iccard_id, errcode=[%d]!\n", sqlca.sqlcode);
+                return(UnionSetUserDefinedErrorCode(0-abs(sqlca.sqlcode)));
+        }
+	
+	sprintf(certID, "%06X", seqNo);
+
+	UnionProgramerLog("in UnionGetCurrentDBSequenceValueOfICCardID:: certID = [%s]!\n", certID);
+
+	return(6);
+	
+}
+*/

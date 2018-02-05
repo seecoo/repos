@@ -1,0 +1,4 @@
+dbTypeLibs=$(CMM2003LIBDIR)unionDataBaseType.mysql.o
+
+realDBLibs = 	$(CMM2003LIBDIR)unionRealBaseDB.mysql.2.0.o	\
+		$(MYSQLCONFIG)

@@ -1,0 +1,8 @@
+dbTypeLibs=$(CMM2003LIBDIR)unionDataBaseType.informix.o
+ifeq ("$(shell uname)","AIX")
+	realDBLibs =    $(CMM2003LIBDIR)unionRealBaseDB.informix.2.0.o		\
+			-L$(INFORMIXLIB)/cli -lifcli -L$(INFORMIXLIB)/esql/ -brtl
+else
+	realDBLibs =	$(CMM2003LIBDIR)unionRealBaseDB.informix.2.0.o		\
+			-L$(INFORMIXLIB)/cli -lifcli -Wl,-rpath,$(INFORMIXLIB)/esql/
+endif

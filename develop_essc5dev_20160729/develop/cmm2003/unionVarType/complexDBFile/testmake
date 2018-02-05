@@ -1,0 +1,81 @@
+COMMDIR = $(UNIONLIBDIR)/
+COMMLIBDIR = $(COMMDIR)lib/
+COMMINCDIR = $(COMMDIR)include/
+COMMBINDIR = $(COMMDIR)tools
+
+HOMEDIR = $(CMM2003DIR)/unionVarType/
+INCDIR = $(HOMEDIR)include/
+INCL = -I $(HOMEDIR)include -I $(COMMINCDIR) 
+
+
+DEFINES = $(OSSPEC)
+
+all:	makeall  \
+        xsj
+
+.SUFFIXES:.c.o
+.c.o:
+	$(CC) $(DEFINES) $(INCL) -c $*.c
+
+libs=	main.o   \
+	unionDefaultVarTypeDefDir.20080925.o            \
+	unionConstDefInDB.20080925.o            \
+	unionProgramDefInDB.20080925.o          \
+	unionArrayDefInDB.20080925.o            \
+	unionEnumDefInDB.20080925.o             \
+	unionSimpleTypeDefInDB.20080925.o               \
+	unionStructDefInDB.20080925.o           \
+	unionUnionDefInDB.20080925.o            \
+	unionFunDefInDB.20080925.o              \
+	unionVariableDefInDB.20080925.o         \
+	unionModuleDefInDB.20080925.o           \
+	unionPointerDefInDB.20080925.o          \
+	unionVarTypeDefInDB.20080925.o          
+makeall:	$(libs)
+
+libs1=  $(COMMLIBDIR)UnionLog1.2.o		\
+	$(COMMLIBDIR)externLogFun.20080717.o	\
+	$(COMMLIBDIR)unionComplexDBRecord.20080801.o          \
+	$(COMMLIBDIR)unionModuleDef.20080925.o \
+        $(COMMLIBDIR)unionComplexDBCommon.20080801.o \
+	$(COMMLIBDIR)unionComplexDBObject.20080801.o \
+	$(COMMLIBDIR)unionComplexDBObjectChildDef.20080801.o \
+	$(COMMLIBDIR)unionComplexDBObjectDef.20080801.o \
+	$(COMMLIBDIR)unionComplexDBObjectFileName.20080801.o \
+	$(COMMLIBDIR)unionComplexDBObjectSql.20080801.o \
+	$(COMMLIBDIR)unionComplexDBPrimaryKey.20080801.o \
+	$(COMMLIBDIR)unionComplexDBRecord.20080801.o \
+	$(COMMLIBDIR)unionComplexDBRecordChild.20080801.o \
+	$(COMMLIBDIR)unionComplexDBRecordParents.20080801.o \
+	$(COMMLIBDIR)unionComplexDBRecordValue.20080801.o \
+	$(COMMLIBDIR)unionComplexDBUniqueKey.20080801.o \
+	$(COMMLIBDIR)unionRecFile.20080724.o \
+	$(COMMLIBDIR)unionRec.20080724.o \
+	$(COMMLIBDIR)unionModuleDefInDB.20080925.o \
+	$(COMMLIBDIR)unionCProgramPhase.20080925.o \
+	$(COMMLIBDIR)unionReadStructFromCFile.20080925.o \
+	$(COMMLIBDIR)unionModuleDef.20080925.o \
+	$(COMMLIBDIR)unionProgramDef.20080925.o \
+	$(COMMLIBDIR)unionTestConf.20081006.o \
+	$(COMMLIBDIR)unionDesignKeyWord.20080925.o \
+        $(COMMLIBDIR)unionGenFunTestProgram.20080925.o \
+	$(COMMLIBDIR)unionAutoGenFileFunGrp.20080925.o \
+	$(COMMLIBDIR)UnionLog1.2.o \
+	$(COMMLIBDIR)unionGenFunTestProgram.20080925.o \
+	$(COMMLIBDIR)unionVarValue.20080925.o \
+	$(COMMLIBDIR)unionVarTypeDef.20080925.o \
+	$(COMMLIBDIR)unionVarDef.20080925.o \
+	$(COMMLIBDIR)unionStructDef.20080925.o \
+	$(COMMLIBDIR)unionUnionDef.20080925.o \
+	$(COMMLIBDIR)unionEnumDef.20080925.o \
+	$(COMMLIBDIR)unionPointerDef.20080925.o \
+	$(COMMLIBDIR)unionVariableDef.20080925.o \
+	$(COMMLIBDIR)unionArrayDef.20080925.o \
+	$(COMMLIBDIR)unionConstDef.20080925.o \
+	$(COMMLIBDIR)unionSimpleTypeDef.20080925.o \
+	$(COMMLIBDIR)unionFunDef.20080925.o \
+	$(COMMLIBDIR)UnionStr1.2.a \
+	$(COMMLIBDIR)unionInput1.0.o
+
+xsj:	$(null)
+	cc -o xsj  $(libs) $(libs1)  $(OSSPECLIBS)

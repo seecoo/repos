@@ -1,0 +1,49 @@
+// 2007/10/26 Wolfgang Wang
+// ver2.x
+// 在2.1.20061227基础上升级成了unionModule2.1.20071026.c
+// 增加了一个数组，用于标识一个进程连接的共享内存。
+// 这个组用于解决在连接的共享内存超过最大限制数目时，释放不必要的连接。
+
+// 在所有20071026版本之前的所有版本程序中，都增加了一个函数
+int UnionIsSharedMemoryInited(PUnionSharedMemoryModule pmdl)
+{
+	if ((pmdl == NULL) || (pmdl == -1))
+		return(0);
+	else	
+		return(1);
+}
+
+// 2007/11/09 Wolfgang Wang
+// 修改unionModule2.1.20071026.c的函数UnionIsSharedMemoryInited
+修改之前：
+int UnionIsSharedMemoryInited(char *mdlName)
+{
+	int	index;
+	
+	UnionInitSharedMemoryGroup();
+	for (index = 0; index < gunionSharedMemoryGrp.num; index++)
+	{
+		if ((gunionSharedMemoryGrp.pshmPtrGrp[index] == NULL) || (gunionSharedMemoryGrp.pshmPtrGrp[index] == -1))
+			continue;
+		if (strcmp(gunionSharedMemoryGrp.pshmPtrGrp[index]->name,mdlName) == 0)
+			return(1);
+	}
+	return(0);
+}
+修改之后
+int UnionIsSharedMemoryInited(char *mdlName)
+{
+	int	index;
+	
+	UnionInitSharedMemoryGroup();
+#ifdef _AIX_	// 20071109,王纯军增加该开关
+	for (index = 0; index < gunionSharedMemoryGrp.num; index++)
+	{
+		if ((gunionSharedMemoryGrp.pshmPtrGrp[index] == NULL) || (gunionSharedMemoryGrp.pshmPtrGrp[index] == -1))
+			continue;
+		if (strcmp(gunionSharedMemoryGrp.pshmPtrGrp[index]->name,mdlName) == 0)
+			return(1);
+	}
+#endif
+	return(0);
+}

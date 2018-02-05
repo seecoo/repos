@@ -1,0 +1,697 @@
+20020731183053:: Debug::PID = [12802]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+20020731183753:: Debug::PID = [12996]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+20020731183920:: Debug::PID = [13025]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+20020731184039:: Debug::PID = [13156]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+20020731184039 User Defined Error:: PID = [13156]
+in UnionInitEmu8583_3_x_Attribute:: Index [0] VarLen [0] small than expected
+
+
+20020731184257:: Debug::PID = [13177]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+20020731184257 User Defined Error:: PID = [13177]
+in UnionInitEmu8583_3_x_Attribute:: Index [0] VarLen [0] small than expected [1]
+
+
+20020731184549:: Debug::PID = [13199]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [4]
+[50] [4] [999]
+[90] [0] [40]
+[127] [0] [4]
+[128] [4] [999]
+
+20020731184736:: Debug::PID = [13219]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [4]
+[50] [4] [999]
+[90] [0] [40]
+[127] [0] [4]
+[128] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731184812:: Debug::PID = [13239]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [4]
+[50] [4] [999]
+[90] [0] [40]
+[127] [0] [4]
+[128] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731185030:: Debug::PID = [13259]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [4]
+[50] [4] [999]
+[90] [0] [40]
+[127] [0] [4]
+[128] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731185119:: Debug::PID = [13279]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [4]
+[50] [4] [999]
+[90] [0] [40]
+[127] [0] [4]
+[128] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731185119 User Defined Error:: PID = [13279]
+in UnionSetEmu8583_3_x_Field:: The field [4] length [10] larger than defined length [4]!
+
+20020731185119 User Defined Error:: PID = [13279]
+in UnionSetEmu8583_3_x_Field:: The field [127] length [13] larger than defined length [4]!
+
+20020731185119:: Debug::PID = [13279]
+Before pack Emu8583
+i = 001 buf = *0200*
+i = 003 buf = *Loveyoubaby*
+i = 050 buf = *God! Who r u*
+
+Pack OK!
+20020731185119 User Defined Error:: PID = [13279]
+in UnionUnpackEmu8583_3_x: out of range!
+
+20020731185315:: Debug::PID = [13301]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [10]
+[50] [4] [999]
+[90] [0] [40]
+[127] [0] [30]
+[128] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731185315:: Debug::PID = [13301]
+Before pack Emu8583
+i = 001 buf = *0200*
+i = 003 buf = *Loveyoubaby*
+i = 004 buf = *8888888888*
+i = 050 buf = *God! Who r u*
+i = 127 buf = *I am Wolfgang*
+
+Pack OK!
+20020731185315 User Defined Error:: PID = [13301]
+in UnionUnpackEmu8583_3_x: out of range!
+
+20020731185324:: Debug::PID = [13304]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [10]
+[50] [4] [999]
+[90] [0] [40]
+[127] [0] [30]
+[128] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731185324:: Debug::PID = [13304]
+Before pack Emu8583
+i = 001 buf = *0200*
+i = 003 buf = *Loveyoubaby*
+i = 004 buf = *8888888888*
+i = 050 buf = *God! Who r u*
+i = 127 buf = *I am Wolfgang*
+
+Pack OK!
+20020731185324 User Defined Error:: PID = [13304]
+in UnionUnpackEmu8583_3_x: out of range!
+
+20020731185445:: Debug::PID = [13326]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [10]
+[50] [4] [999]
+[90] [0] [40]
+[127] [0] [30]
+[128] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731185445:: Debug::PID = [13326]
+Before pack Emu8583
+i = 001 buf = *0200*
+i = 003 buf = *Loveyoubaby*
+i = 004 buf = *8888888888*
+i = 050 buf = *God! Who r u*
+i = 127 buf = *I am Wolfgang*
+
+Pack OK!
+20020731185445 User Defined Error:: PID = [13326]
+in UnionUnpackEmu8583_3_x: out of range!
+
+20020731185517:: Debug::PID = [13346]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [10]
+[50] [4] [999]
+[90] [0] [40]
+[127] [0] [30]
+[128] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731185517:: Debug::PID = [13346]
+Before pack Emu8583
+i = 001 buf = *0200*
+i = 003 buf = *Loveyoubaby*
+i = 004 buf = *8888888888*
+i = 050 buf = *God! Who r u*
+i = 127 buf = *I am Wolfgang*
+
+Pack OK!
+20020731185517 User Defined Error:: PID = [13346]
+in UnionUnpackEmu8583_3_x: out of range!
+
+20020731190010:: Debug::PID = [13376]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [10]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731190010 User Defined Error:: PID = [13376]
+in UnionSetEmu8583_3_x_Field:: The field [4] length [12] larger than defined length [10]!
+
+20020731190010:: Debug::PID = [13376]
+Before pack Emu8583
+i = 001 buf = *0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *8888888888*
+i = 005 buf = *I am Wolfgang*
+
+Pack OK!
+20020731190010:: Debug::PID = [13376]
+After unpack 8583:
+
+i = 000 buf = *      *
+i = 001 buf = *          0200*
+i = 002 buf = **
+i = 003 buf = *oubaby*
+i = 004 buf = *          *
+
+20020731190602:: Debug::PID = [13378]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731190602:: Debug::PID = [13378]
+Before pack Emu8583
+i = 001 buf = *0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *8888888888*
+i = 004 buf = *God! Who r u*
+i = 005 buf = *I am Wolfgang*
+
+Pack OK!
+20020731190602 User Defined Error:: PID = [13378]
+in UnionUnpackEmu8583_3_x: [i] out of range!
+
+20020731190701:: Debug::PID = [13398]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731190701:: Debug::PID = [13398]
+Before pack Emu8583
+i = 001 buf = *0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *8888888888*
+i = 004 buf = *God! Who r u*
+i = 005 buf = *I am Wolfgang*
+
+Pack OK!
+20020731190701 User Defined Error:: PID = [13398]
+in UnionUnpackEmu8583_3_x: [5] out of range!
+
+20020731191050:: Debug::PID = [13432]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731191050:: Debug::PID = [13432]
+Before pack Emu8583
+i = 001 buf = *0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *8888888888*
+i = 004 buf = *God! Who r u*
+i = 005 buf = *I am Wolfgang*
+
+Pack OK!
+20020731191050 User Defined Error:: PID = [13432]
+in UnionUnpackEmu8583_3_x: [5] out of range!
+
+20020731191209:: Debug::PID = [13453]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731191209:: Debug::PID = [13453]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020731191209 User Defined Error:: PID = [13453]
+in UnionUnpackEmu8583_3_x: [5] out of range!
+
+20020731191216:: Debug::PID = [13472]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731191216:: Debug::PID = [13472]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020731191216 User Defined Error:: PID = [13472]
+in UnionUnpackEmu8583_3_x: [5] out of range!
+
+20020731191403:: Debug::PID = [13492]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731191403:: Debug::PID = [13492]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020731191403 User Defined Error:: PID = [13492]
+in UnionUnpackEmu8583_3_x: [5] out of range!
+
+20020731191517:: Debug::PID = [13512]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731191517:: Debug::PID = [13512]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020731191517 User Defined Error:: PID = [13512]
+in UnionUnpackEmu8583_3_x: [5] out of range!
+
+20020731192545:: Debug::PID = [13513]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020731192545:: Debug::PID = [13513]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020731192545 User Defined Error:: PID = [13513]
+in UnionUnpackEmu8583_3_x: [5] out of range!
+
+20020801095332:: Debug::PID = [13878]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020801095333:: Debug::PID = [13878]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020801095333 User Defined Error:: PID = [13878]
+in UnionUnpackEmu8583_3_x: [5] out of range!
+
+20020801095525:: Debug::PID = [13898]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020801095525:: Debug::PID = [13898]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020801095525:: Debug::PID = [13898]
+After unpack 8583:
+
+i = 000 buf = *      *
+i = 001 buf = *          0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *                              8888888888*
+i = 004 buf = *   God! Who r u*
+i = 005 buf = *I am Wolfgang*
+
+20020801095730:: Debug::PID = [13918]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020801095731:: Debug::PID = [13918]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020801095731:: Debug::PID = [13918]
+After unpack 8583:
+
+i = 000 buf = *      *
+i = 001 buf = *          0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *                              8888888888*
+i = 004 buf = *   God! Who r u*
+i = 005 buf = *I am Wolfgang*
+
+20020801095838:: Debug::PID = [13939]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020801095838:: Debug::PID = [13939]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020801095838:: Debug::PID = [13939]
+After unpack 8583:
+
+i = 000 buf = *      *
+i = 001 buf = *          0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *                              8888888888*
+i = 004 buf = *   God! Who r u*
+i = 005 buf = *I am Wolfgang*
+
+20020801095916:: Debug::PID = [13941]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020801095916:: Debug::PID = [13941]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020801095916:: Debug::PID = [13941]
+After unpack 8583:
+
+i = 000 buf = *      *
+i = 001 buf = *          0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *                              8888888888*
+i = 004 buf = *   God! Who r u*
+i = 005 buf = *I am Wolfgang*
+
+20020801095934:: Debug::PID = [13942]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020801095934:: Debug::PID = [13942]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020801095934:: Debug::PID = [13942]
+After unpack 8583:
+
+i = 000 buf = *      *
+i = 001 buf = *          0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *                              8888888888*
+i = 004 buf = *   God! Who r u*
+i = 005 buf = *I am Wolfgang*
+
+20020801100008:: Debug::PID = [13962]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020801100008:: Debug::PID = [13962]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00013] buf = *I am Wolfgang*
+
+Pack OK!
+20020801100008:: Debug::PID = [13962]
+After unpack 8583:
+
+i = 000 buf = *      *
+i = 001 buf = *          0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *                              8888888888*
+i = 004 buf = *   God! Who r u*
+i = 005 buf = *I am Wolfgang*
+
+20020801100100:: Debug::PID = [13982]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020801100100:: Debug::PID = [13982]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00018] buf = *I am Wolfgang Wang*
+
+Pack OK!
+20020801100100:: Debug::PID = [13982]
+After unpack 8583:
+
+i = 000 buf = *      *
+i = 001 buf = *          0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *                              8888888888*
+i = 004 buf = *   God! Who r u*
+i = 005 buf = *I am Wolfgang Wang*
+
+20020801100208:: Debug::PID = [13997]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [0] [6]
+[1] [0] [14]
+[2] [0] [11]
+[3] [0] [40]
+[4] [0] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020801100208:: Debug::PID = [13997]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00018] buf = *I am Wolfgang Wang*
+
+Pack OK!
+20020801100208:: Debug::PID = [13997]
+After unpack 8583:
+
+i = 000 buf = *      *
+i = 001 buf = *          0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *                              8888888888*
+i = 004 buf = *   God! Who r u*
+i = 005 buf = *I am Wolfgang Wang*
+
+20020801100329:: Debug::PID = [14016]
+in UnionInitEmu8583_3_x_Attribute::8583 attribute::
+
+[0] [2] [6]
+[1] [0] [14]
+[2] [3] [11]
+[3] [4] [40]
+[4] [3] [15]
+[5] [4] [999]
+in UnionInitEmu8583_3_x_Attribute:: Init OK!
+20020801100329:: Debug::PID = [14016]
+Before pack Emu8583
+i = 001 [00004] buf = *0200*
+i = 002 [00011] buf = *Loveyoubaby*
+i = 003 [00010] buf = *8888888888*
+i = 004 [00012] buf = *God! Who r u*
+i = 005 [00018] buf = *I am Wolfgang Wang*
+
+Pack OK!
+20020801100329:: Debug::PID = [14016]
+After unpack 8583:
+
+i = 001 buf = *          0200*
+i = 002 buf = *Loveyoubaby*
+i = 003 buf = *8888888888*
+i = 004 buf = *God! Who r u*
+i = 005 buf = *I am Wolfgang Wang*
+

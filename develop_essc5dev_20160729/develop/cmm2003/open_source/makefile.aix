@@ -1,0 +1,16 @@
+PATH=/usr/bin
+OBJECT_MODE=$(APPBits)
+
+dirs = make-3.82
+
+all:	$(dirs)
+
+make-3.82:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+	cd $@ && ./configure -prefix=$(CMM2003OPENDIR) && make && make install
+	rm -rf $@
+
+clean:
+	rm -rf $(dirs)

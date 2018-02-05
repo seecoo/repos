@@ -1,0 +1,4 @@
+dbTypeLibs=$(CMM2003LIBDIR)unionDataBaseType.sqlite.o
+
+realDBLibs = 	$(CMM2003LIBDIR)unionRealBaseDB.sqlite.2.0.o	\
+		$(CMM2003LIBDIR)sqlite3.o

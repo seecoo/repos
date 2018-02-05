@@ -1,0 +1,354 @@
+# 压缩库 libz
+#compressLibs=$(CMM2003OPENDIR)/lib/libz.a
+compressLibs=-lz
+# 事件库
+eventLibs=$(CMM2003OPENDIR)/lib/libevent.a 
+# openssl
+opensslLibs=$(CMM2003LIBDIR)unionRSA2.0.o				\
+            $(CMM2003OPENDIR)/lib/libcrypto.a
+iconvLibs=$(CMM2003OPENDIR)/lib/libiconv.a
+
+# 以下定义通用库
+logAndTaskLibs=	$(CMM2003LIBDIR)unionTask.20090421.useSig2.o	\
+		$(CMM2003LIBDIR)UnionLog.20140912.o		\
+		$(CMM2003LIBDIR)unionSystemTime1.0.o		\
+		$(CMM2003LIBDIR)UnionESBLog.20160322.o		\
+		$(CMM2003LIBDIR)unionLogTBL.20140912.o		\
+		$(CMM2003LIBDIR)libilog.a
+
+versionLibs2_0=$(CMM2003VERLIB)unionPredefinedVersion2.0.a
+
+libSM2Libs=	$(CMM2003LIBDIR)mrarth0.o	\
+		$(CMM2003LIBDIR)mrarth3.o	\
+		$(CMM2003LIBDIR)mrcore.o 	\
+		$(CMM2003LIBDIR)mrebrick.o	\
+		$(CMM2003LIBDIR)mrfast.o	\
+		$(CMM2003LIBDIR)mrgf2m.o	\
+		$(CMM2003LIBDIR)mrjack.o 	\
+		$(CMM2003LIBDIR)mrpower.o	\
+		$(CMM2003LIBDIR)mrscrt.o	\
+		$(CMM2003LIBDIR)mrshs.o		\
+		$(CMM2003LIBDIR)mrstrong.o	\
+		$(CMM2003LIBDIR)mrzzn2.o 	\
+		$(CMM2003LIBDIR)mraes.o		\
+		$(CMM2003LIBDIR)mrarth1.o	\
+		$(CMM2003LIBDIR)mrbits.o 	\
+		$(CMM2003LIBDIR)mrcrt.o		\
+		$(CMM2003LIBDIR)mrec2m.o	\
+		$(CMM2003LIBDIR)mrgcd.o 	\
+		$(CMM2003LIBDIR)mrio1.o 	\
+		$(CMM2003LIBDIR)mrlucas.o	\
+		$(CMM2003LIBDIR)mrprime.o	\
+		$(CMM2003LIBDIR)mrshs256.o	\
+		$(CMM2003LIBDIR)mrsmall.o	\
+		$(CMM2003LIBDIR)mrxgcd.o	\
+		$(CMM2003LIBDIR)mrzzn3.o 	\
+		$(CMM2003LIBDIR)mralloc.o	\
+		$(CMM2003LIBDIR)mrarth2.o	\
+		$(CMM2003LIBDIR)mrbrick.o	\
+		$(CMM2003LIBDIR)mrcurve.o	\
+		$(CMM2003LIBDIR)mrecn2.o	\
+		$(CMM2003LIBDIR)mrgcm.o 	\
+		$(CMM2003LIBDIR)mrio2.o 	\
+		$(CMM2003LIBDIR)mrmonty.o	\
+		$(CMM2003LIBDIR)mrrand.o 	\
+		$(CMM2003LIBDIR)mrshs512.o	\
+		$(CMM2003LIBDIR)mrsroot.o	\
+		$(CMM2003LIBDIR)mrzzn2b.o 	\
+		$(CMM2003LIBDIR)sm2.o
+
+algorithmLibs=	$(CMM2003LIBDIR)UnionDes.20050706.o		\
+		$(CMM2003LIBDIR)UnionDataExch1.0.o		\
+		$(CMM2003LIBDIR)UnionBaseDes.20050222.o		\
+		$(CMM2003LIBDIR)UnionMAC1.0.o			\
+		$(CMM2003LIBDIR)UnionXOR1.0.o			\
+		$(CMM2003LIBDIR)UnionMD5_1.0.o			\
+		$(CMM2003LIBDIR)UnionSHA1_1.0.o			\
+		$(CMM2003LIBDIR)base64.o			\
+		$(CMM2003LIBDIR)sm3.o				\
+		$(libSM2Libs)					\
+		$(CMM2003LIBDIR)unionPBOCKeyGenerate.20050706.o
+
+userInterfaceLibs=$(CMM2003LIBDIR)unionInput1.0.a
+
+libmxmlLibs =	$(CMM2003LIBDIR)unionMXML1.0.o			\
+		$(CMM2003LIBDIR)unionXMLPackage.mxml.1.0.o	\
+		$(CMM2003LIBDIR)unionPackage.1.0.o		\
+		$(CMM2003LIBDIR)libmxml.a
+		
+libxml2Libs =	$(CMM2003LIBDIR)unionXML1.0.o			\
+		$(CMM2003LIBDIR)unionXMLPackage1.0.o		\
+		$(CMM2003OPENDIR)/lib/libxml2.a			\
+		$(iconvLibs)
+
+ifeq ($(UNION_USE_GCC),0)
+libMemcLibs =	$(CMM2003LIBDIR)/unionMemcached.1.0.o		\
+		$(CMM2003OPENDIR)/lib/libmemcached.a		\
+		-lC
+else
+libMemcLibs =	$(CMM2003LIBDIR)/unionMemcached.1.0.o		\
+		$(CMM2003OPENDIR)/lib/libmemcached.a		\
+		-lstdc++
+endif
+
+libHighCachedLibs =	$(CMM2003LIBDIR)unionHighCachedAPI.20130301.o	\
+			$(CMM2003LIBDIR)/unionMemcachedConf.20140701.o  \
+			$(libMemcLibs)
+
+commLibs =	$(sharedLibs)				\
+		$(userInterfaceLibs)			\
+		$(logAndTaskLibs)			\
+		$(versionLibs2_0)			\
+		$(libmxmlLibs)
+
+libsOfCommConf=$(CMM2003LIBDIR)unionCommConf.500.20051009.o
+
+resLibs=	$(CMM2003LIBDIR)unionResID.20060808.o
+mdlLibs=	$(CMM2003LIBDIR)unionMDLID.20080511.o
+
+recLibs=	$(CMM2003LIBDIR)unionRecFile.20080724.o		\
+		$(CMM2003LIBDIR)unionWorkingDir.20080724.o
+
+# 核心消息交换区
+#msgBufLibs=	$(CMM2003LIBDIR)unionMsgBuf.20130301.o		
+msgBufLibs=	$(CMM2003LIBDIR)unionMsgBuf.20131201.o			\
+		$(msgBufEtcLibs)
+commBetweenMDLLibs=$(CMM2003LIBDIR)unionCommBetweenMDL.20080511.o	\
+		$(msgBufLibs)
+
+sharedLibs =	$(CMM2003LIBDIR)UnionSocket3.0.sendDataAfterClose.o		\
+		$(CMM2003LIBDIR)unionEnv3.0.o					\
+		$(CMM2003LIBDIR)unionVersion.verifyLiscence.20120919.o		\
+		$(dbTypeLibs)					\
+		$(CMM2003LIBDIR)cmm2003LibName.20080310.o	\
+		$(CMM2003LIBDIR)unionLisence.20080716.o		\
+		$(CMM2003LIBDIR)unionREC.20090421.o		\
+		unionProductGenerateTime.a			\
+		$(CMM2003LIBDIR)errCodeTranslater.20130301.o	\
+		$(CMM2003LIBDIR)UnionStr1.2.o			\
+		$(CMM2003LIBDIR)unionProc.20061116.o		\
+		$(CMM2003LIBDIR)unionOSLockMachinism2.0.o	\
+		$(algorithmLibs)				\
+		$(CMM2003LIBDIR)unionPreDefinedCmd1.0.a		\
+		$(CMM2003LIBDIR)unionDBConnect.1.0.o		\
+		$(CMM2003LIBDIR)unionDBConf.1.0.o		\
+		$(CMM2003LIBDIR)unionDBPassword.1.0.o		\
+		$(CMM2003LIBDIR)unionRealBaseDB.IdleDBTime.2.0.o		\
+		$(CMM2003LIBDIR)unionModule2.1.20090421.defFile.o \
+		$(CMM2003LIBDIR)unionModule2.1.20090421.o	\
+		$(CMM2003LIBDIR)unionTableDef.1.0.o		\
+		$(CMM2003LIBDIR)unionTableData.1.0.o		\
+		$(CMM2003LIBDIR)unionReloadTableDef.1.0.o	\
+		$(CMM2003LIBDIR)highCached.20130301.o		\
+		$(CMM2003LIBDIR)clusterSyn.20130301.o		\
+		$(CMM2003LIBDIR)unionDataSync.2.0.o		\
+		$(sharedDBSpecLibs)				\
+		$(commBetweenMDLLibs)				\
+		$(mdlLibs)					\
+		$(compressLibs)					\
+		$(OSSPECLIBS)
+
+monitorLibs=	$(CMM2003LIBDIR)unionMonitor1.0.20041125.a
+
+# 应用服务器主程序库
+svrNameLibs=	$(CMM2003LIBDIR)unionFunSvrName.20080511.o
+
+funSvrLibs	=$(CMM2003LIBDIR)unionFunSvrMain.20130301.o		\
+		$(CMM2003LIBDIR)unionFunSvr.sharedHsmTaskLog.20130301.o	\
+		$(CMM2003LIBDIR)xmlPackageInterprotorService.20130301.o	\
+		$(CMM2003LIBDIR)unionRegisterRunningTime.20130301.o	\
+		$(svrNameLibs)						\
+		$(compressLibs)
+		
+# 以下定义主程序
+shortConnMainLibs=$(CMM2003LIBDIR)shortConnTcpipSvrMain.20130301.o
+appConnMainLibs=$(CMM2003LIBDIR)shortConnTcpipSvrMain.20140904.o
+
+# 标准通讯程序库
+tcpipSvrSharedLibs=$(CMM2003LIBDIR)UnionTCPIPSvr4.0.20061108.o		\
+		$(CMM2003LIBDIR)tcpipSvrRunningEnv.null.o		\
+		$(CMM2003LIBDIR)unionRegisterRunningTime.20130301.o	\
+		$(svrNameLibs)
+tcpipSvrLibs=	$(CMM2003LIBDIR)synchTCPIPSvr.xml.20130301.o		\
+		$(CMM2003LIBDIR)setXMLResponsePackageForError.20080511.o	\
+		$(CMM2003LIBDIR)packageConvert.null.20130301.o		\
+		$(tcpipSvrSharedLibs)
+
+# ESSC5定制通讯程序库
+tcpipSvrForESSC3XLibs=	$(CMM2003LIBDIR)synchTCPIPSvr.xml.20130301.o		\
+			$(CMM2003LIBDIR)setXMLResponsePackageForError.20080511.o	\
+			$(PROLIBDIR)esscPackageConvert.20130301.o		\
+			$(PROLIBDIR)esscPackage.20130301.o			\
+			$(tcpipSvrSharedLibs)
+
+# ESSC2X定制通讯程序库
+tcpipSvrForESSC2XLibs=	$(CMM2003LIBDIR)synchTCPIPSvr.xml.20130301.o		\
+			$(CMM2003LIBDIR)setXMLResponsePackageForError.20080511.o	\
+			$(PROLIBDIR)esscPackageConvert.20130301.o		\
+			$(PROLIBDIR)esscPackage.2x.20130301.o			\
+			$(tcpipSvrSharedLibs)
+
+# 密码机
+hsmDefLibs=	$(CMM2003LIBDIR)unionHsmGroup.20120521.o	\
+		$(CMM2003LIBDIR)unionHsm.20120521.o		\
+		$(CMM2003LIBDIR)hsmDefaultFunction.20120521.o
+
+# 使用dbSvr库
+useDBSvrLibs =	$(CMM2003LIBDIR)unionRealBaseDB.dbSvr.2.0.o
+
+hsmCmdLibs =	$(CMM2003LIBDIR)unionHsmCmd.20120521.o				\
+		$(CMM2003LIBDIR)unionHsmCmdJK.20140409.o			\
+		$(CMM2003LIBDIR)unionHsmCmd.sjj1127.20120521.o			\
+		$(CMM2003LIBDIR)3DesRacalSyntaxRules1.0.o			\
+		$(CMM2003LIBDIR)emv2000AndPbocSyntaxRules.20120521.o
+
+recFileLibs=	$(CMM2003LIBDIR)unionRecFile.20080724.o				\
+		$(CMM2003LIBDIR)unionWorkingDir.20080724.o
+
+baseServiceForUILibs = 	$(CMM2003LIBDIR)serviceCode0000.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0001.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0002.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0003.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0005.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0101.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0102.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0103.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0104.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0105.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0201.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0202.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0203.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0204.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0205.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0206.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0207.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0208.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0209.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0301.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0302.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0303.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0304.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0305.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0306.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0307.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0308.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0309.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0310.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0311.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0312.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0401.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0402.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0403.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0404.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0405.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0406.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0407.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0408.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0409.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0410.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0411.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0412.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0413.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0414.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0415.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0416.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0417.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0501.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0502.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0503.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0504.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0505.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0506.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0507.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0508.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0901.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0902.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0903.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0904.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0H01.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0H02.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0H03.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0H04.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0H05.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0H06.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0H07.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0H08.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0H09.20130301.o		\
+			$(CMM2003LIBDIR)serviceCode0H10.20130301.o		\
+			$(CMM2003LIBDIR)sm3.o					\
+			$(CMM2003LIBDIR)sm2.a					\
+			$(CMM2003LIBDIR)otpInterface.o				\
+			$(CMM2003LIBDIR)inputAndOutputDataForDB.2.0.o
+
+registerForUILibs = 	$(CMM2003LIBDIR)registerAuditAndApproval.a
+
+esscServiceForUILibs = 	$(PROLIBDIR)essc5ServiceForUI.a
+		
+# 密钥库接口
+keyDBLibs =	$(PROLIBDIR)symmetricKeyDB.20130301.o			\
+		$(PROLIBDIR)symmetricKeyDBJnl.20130301.o		\
+		$(PROLIBDIR)asymmetricKeyDB.20130301.o			\
+		$(PROLIBDIR)asymmetricKeyDBJnl.20130301.o		\
+		$(PROLIBDIR)remoteKeyPlatform.20130301.o		\
+		$(PROLIBDIR)defaultIBMPinOffsetDef.20130301.o
+
+# essc5接口库 - standard
+essc5InterfaceStandardLibs = 	$(PROLIBDIR)essc5Interface-standard.a
+essc5InterfaceE141Libs = 	$(PROLIBDIR)essc5Interface-E141.a
+essc5InterfaceE161Libs = 	$(PROLIBDIR)essc5Interface-E161.a
+essc5InterfaceE173Libs = 	$(PROLIBDIR)essc5Interface-E173.a
+
+# essc5接口库 - pboc
+essc5InterfacePbocLibs = 	$(PROLIBDIR)essc5Interface-pboc.a
+
+# essc5接口库 - ebank
+essc5InterfaceEbankLibs = 	$(PROLIBDIR)essc5Interface-ebank.a
+
+# essc5接口库 - ccfccb 
+essc5InterfaceCcfccbLibs=	$(PROLIBDIR)essc5Interface-ccfccb.a
+
+# essc5接口库 - froad 
+essc5InterfaceFroadLibs=	$(PROLIBDIR)essc5Interface-froad.a
+#essc5InterfaceFroadLibs=	$(PROLIBDIR)essc5InterfaceService-froad.20130301.o
+
+# essc5接口库 - cnaps2 
+essc5InterfaceCnaps2Libs=	$(PROLIBDIR)essc5Interface-cnaps2.a
+
+# essc5接口库 - cgb 
+essc5InterfaceCgbLibs=		$(PROLIBDIR)essc5Interface-cgb.a
+
+# essc5接口库 - aliyun
+essc5InterfaceAliyunLibs=	$(PROLIBDIR)essc5Interface-aliyun.a
+
+
+# essc5接口库 - nmgsb 
+essc5InterfaceNmgsbLibs=		$(PROLIBDIR)essc5Interface-nmgsb.a
+
+
+algorithmLib = $(PROLIBDIR)algorithm.a
+
+unionCertLibs = $(PROLIBDIR)unionCharCode.o     	\
+                $(PROLIBDIR)unionCertFun.o      	\
+                $(PROLIBDIR)unionVKForm.o       	\
+                $(PROLIBDIR)unionJKSFun.o		\
+		$(PROLIBDIR)unionCertFunSM2.o		\
+		$(PROLIBDIR)unionGmP7.o			\
+                $(opensslLibs)				\
+                $(iconvLibs)
+
+unionCertSM2Libs =	$(PROLIBDIR)unionCertFunSM2.o           \
+               	  	$(PROLIBDIR)unionGmP7.o                 \
+			$(opensslLibs)				\
+			$(PROLIBDIR)unionCharCode.o             \
+			$(iconvLibs)				
+
+
+tcpipSvrMainForHsmSvrLibs=	$(CMM2003LIBDIR)tcpipSvrMainForHsmSvr.20080511.o	\
+				$(tcpipSvrSharedLibs)					
+
+hsmSvrLibs=	$(CMM2003LIBDIR)commWithHsmSvr.20130301.o
+
+# 定义文件传输库
+#libFileTransfer =       $(CMM2003LIBDIR)unionFileTransfer.2.0.o         \
+#                        $(CMM2003LIBDIR)unionTmpFileDir.20040723.o      \
+#                        $(CMM2003LIBDIR)unionIO.20120521.o

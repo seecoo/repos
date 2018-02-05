@@ -1,0 +1,79 @@
+
+# CMM层交付目录的位置cmmDevLib目录路径
+export UNIONLIBDIR=$HOME/essc5dev_new/cmmDevLib/
+# 应用层交付目录位置,如:kmsDevLib
+export PRODUCTHOUSEWARE=$HOME/essc5dev_new/setup/
+
+# 定义科友主开发目录
+MAINDEVDIROFUNION=$HOME/essc5dev_new/develop/
+DEVDIR=$MAINDEVDIROFUNION/
+export MAINDEVDIROFUNION DEVDIR
+
+CMM2003DIR=$HOME/essc5dev_new/develop/cmm2003/
+export CMM2003DIR
+
+. $UNIONLIBDIR/bin.x/changeOsBit.x 64
+
+# 设置coredump产生core文件
+ulimit -c unlimited
+
+alias rm="rm -i"
+alias l="ls -l"
+set -o vi
+
+LANG="zh_CN.GB18030"
+LANGUAGE="zh_CN.GB18030:zh_CN.GB2312:zh_CN"
+SUPPORTED="zh_CN.GB18030:zh_CN:zh:en_US.UTF-8:en_US:en"
+SYSFONT="lat0-sun16"
+export LANG LANGUAGE SUPPORTED SYSFONT
+
+export ORACLE_BASE=/u01/app/oracle
+export ORACLE_HOME=$ORACLE_BASE/product/11.2.0/dbhome_1
+export ORACLE_SID=essc
+export PATH=$ORACLE_HOME/bin:$PATH
+
+# 访问数据库
+DBNAME=orcl60
+DBUSER=mockmsdev
+DBPASSWD=A52301A890E510E1D15AB4664B8B1515
+export DBUSER DBPASSWD DBNAME
+
+NLS_LANG="Simplified Chinese_china".ZHS16GBK
+export NLS_LANG
+
+# 访问Mysql
+export MYSQLCONFIG="-L/usr/lib -lmysql"
+
+# informix
+if [ $OSName == "AIX" ] ; then
+	INFORMIXDIR=/u4/informix
+else
+	INFORMIXDIR=/home/informix
+fi
+INFORMIXSERVER=informixsvr
+export INFORMIXDIR INFORMIXSERVER
+
+LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH:$ORACLE_LIB_DIR:/lib:/usr/lib:.
+export LD_LIBRARY_PATH
+
+PATH=$PATH:$CMM2003TOOLSDIR:$ORACLE_HOME/bin:$INFORMIXDIR/bin:$CMM2003DIR/ktools:$DEVDIR/makeBins:.
+export PATH
+
+
+# 设置运行环境目录
+UNIONREC=$HOME/essc5dev_new/rec
+# 设置配置文件目录
+UNIONETC=$UNIONREC/etc
+# 设置日志文件目录
+UNIONLOG=$UNIONREC/log
+# 设置暂时文件目录
+UNIONTEMP=$UNIONREC/tmp
+# 设置测试目录
+UNIONTEST=$DIROFESSCAPI/testData
+export UNIONREC UNIONETC UNIONLOG UNIONTEMP UNIONTEST
+PATH=$PATH:$UNIONREC/bin:$UNIONREC/bin.x:.
+export PATH
+
+export ZLOG_PROFILE_ERROR=$UNIONLOG/zlog.error.log
+
+#end of file

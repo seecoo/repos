@@ -1,0 +1,169 @@
+OSName := $(shell uname)
+
+#ifeq ($(filter $(MAKECMDGOALS),clean install show),)
+#	PATH=/bin:/usr/bin:.
+#endif
+
+dirs =	openssl-1.0.1g		\
+	libiconv-1.14		\
+	libev-4.15		\
+	curl-7.25.0		\
+	libevent-2.0.20-stable	\
+	memcached-1.4.24	\
+	libmemcached-1.0.18
+
+ifneq ($(UNION_USE_BITS),64)
+	HPUXTAG=hpux-ia64-cc
+	HPUXGCC="gcc -milp32"
+	HPUXCXX="g++ -milp32"
+else
+	HPUXTAG=hpux64-ia64-cc
+	HPUXGCC="gcc -mlp64"
+	HPUXCXX="g++ -mlp64"
+endif
+
+ifeq ($(OSName),AIX)
+	CXX = "cc -q$(UNION_USE_BITS) -lC"
+	CC = "cc -q$(UNION_USE_BITS)"
+elifeq ($(OSName),HP-UX)
+	CXX = "cc +DD$(UNION_USE_BITS) -Aa"
+	CC = "cc +DD$(UNION_USE_BITS)"
+	KERNEL_BITS = $(UNION_USE_BITS)
+else
+	CC = "gcc -m$(UNION_USE_BITS) -fPIC"
+	CXX= "g++ -m$(UNION_USE_BITS) -fPIC"
+endif
+
+all:	$(dirs)
+
+libiconv-1.14:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+ifeq ($(OSName),AIX)
+	cd $@ && export OBJECT_MODE=$(OBJECT_MODE) && CC=$(CC) ./configure --prefix=$(CMM2003OPENDIR) --enable-static=yes --enable-shared=no && make && make install
+else
+	cd $@ && CC=$(CC) ./configure --prefix=$(CMM2003OPENDIR) --enable-static=yes --enable-shared=no && make && make install
+endif
+	rm -rf $@
+
+openssl-1.0.1g:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+ifeq ($(OSName),AIX)
+	cd $@ && export OBJECT_MODE=$(OBJECT_MODE) ./config --prefix=$(CMM2003OPENDIR) && make && make install
+elifeq ($(OSName),HP-UX)
+	cd $@ && export KERNEL_BITS=$(KERNEL_BITS) && CC=cc ./config --prefix=$(CMM2003OPENDIR) && make && make install
+else
+	cd $@ && CC=$(CC) ./config --prefix=$(CMM2003OPENDIR) shared zlib-dynamic enable-camellia && make && make install
+endif
+	rm -rf $@
+
+openssl-0.9.8r:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+ifeq ($(OSName),AIX)
+	cd $@ && export OBJECT_MODE=$(OBJECT_MODE) ./config --prefix=$(CMM2003OPENDIR) && make && make install
+elifeq ($(OSName),HP-UX)
+	cd $@ && CC=cc ./Configure $(HPUXTAG) --prefix=$(CMM2003OPENDIR) && make && make install
+else
+	cd $@ && CC=$(CC) ./config --prefix=$(CMM2003OPENDIR) shared zlib-dynamic enable-camellia && make && make install
+endif
+	rm -rf $@
+
+curl-7.25.0:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+ifeq ($(OSName),AIX)
+	cd $@ && CC=$(CC) ./configure --enable-shared=no --prefix=$(CMM2003OPENDIR) --without-ssl --disable-shared && make && make install
+else
+	cd $@ && CC=$(CC) ./configure --enable-shared=no --prefix=$(CMM2003OPENDIR) && make && make install
+endif
+	rm -rf $@
+
+libxml2-2.9.1:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+	cd $@ && CC=$(CC) ./configure --enable-shared=no --prefix=$(CMM2003OPENDIR) --without-zlib && make && make install
+	rm -rf $@
+
+libevent-2.0.20-stable:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+	cd $@ && CC=$(CC) ./configure --enable-shared=no --prefix=$(CMM2003OPENDIR) && make && make install
+	rm -rf $@
+
+libev-4.15:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+	cd $@ && CC=$(CC) ./configure --enable-shared=no --prefix=$(CMM2003OPENDIR) && make && make install
+	rm -rf $@
+
+memcached-1.4.24:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+ifeq ($(OSName),AIX)
+	cd $@ && sed 's/thread_init/thread_init_memcached/g' memcached.h>memcached.h.$$$$ && mv memcached.h.$$$$ memcached.h && sed 's/thread_init/thread_init_memcached/g' memcached.c>memcached.c.$$$$ && mv memcached.c.$$$$ memcached.c && sed 's/thread_init/thread_init_memcached/g' thread.c>thread.c.$$$$ && mv thread.c.$$$$ thread.c
+elifeq ($(OSName),HP-UX)
+	cd $@ && env CFLAGS=-D_XOPEN_SOURCE_EXTENDED CC=$(CC) ./configure --prefix=$(CMM2003OPENDIR) --with-libevent=$(CMM2003OPENDIR) && make && make install
+else
+	cd $@ && CC=$(CC) ./configure --prefix=$(CMM2003OPENDIR) --with-libevent=$(CMM2003OPENDIR) && make && make install
+endif
+	rm -rf $@
+
+libmemcached-1.0.18:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+ifeq ($(OSName),AIX)
+	cp ./getopt.h $@
+	cd $@ && export OBJECT_MODE=$(OBJECT_MODE) && CC=$(CC) CXX=$(CXX) LDFLAGS=" -lm" ./configure --enable-shared=no --enable-jobserver=no --disable-sasl --prefix=$(CMM2003OPENDIR) && make && make install
+elifeq ($(OSName),HP-UX)
+	cp ./getopt.h.hpux $@/getopt.h
+	cd $@ && CC=$(HPUXGCC) CXX=$(HPUXCXX) ./configure --enable-shared=no --disable-sasl --enable-jobserver=no --prefix=$(CMM2003OPENDIR) && make && make install
+#	cd $@ && CFLAGS=-D_XOPEN_SOURCE_EXTENDED CXXFLAGS=-D_XOPEN_SOURCE_EXTENDED CC=$(HPUXGCC) CXX=$(HPUXCXX) ./configure --enable-shared=no --disable-sasl --enable-jobserver=no --prefix=$(CMM2003OPENDIR) && make && make install
+#	cd $@ && CFLAGS=-D_XOPEN_SOURCE_EXTENDED CXXFLAGS=-D_XOPEN_SOURCE_EXTENDED CC=$(CC) CXX=$(CXX) ./configure --host=ia64-hp-hpux11 --enable-shared=no --disable-sasl --enable-jobserver=no --prefix=$(CMM2003OPENDIR) && make && make install
+else
+	cd $@ && CC=$(CC) CXX=$(CXX) ./configure --enable-shared=no --enable-jobserver=no --disable-sasl --prefix=$(CMM2003OPENDIR) && make && make install
+endif
+	rm -rf $@
+
+unixODBC-2.3.1:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+	cd $@ && CC=$(CC) ./configure --enable-shared=no --prefix=$(CMM2003OPENDIR) && make && make install
+	rm -rf $@
+
+tokyocabinet-1.4.48:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+	cd $@ && CC=$(CC) ./configure --enable-shared=no --prefix=$(CMM2003OPENDIR) && make && make install
+	rm -rf $@
+
+tokyotyrant-1.1.41:
+	gzip -d $@.tar.gz
+	tar xvf $@.tar
+	gzip  $@.tar
+	cd $@ && CC=$(CC) ./configure --enable-shared=no --prefix=$(CMM2003OPENDIR) --with-tc=$(CMM2003OPENDIR) && make && make install
+	rm -rf $@
+
+clean:
+	rm -rf $(dirs)
+
+show:
+	@make -v
+	@echo '=============================================================='
+	@echo 'dirs		:' $(dirs)
+	@echo 'UNION_USE_BITS	:' $(UNION_USE_BITS)
+	@echo 'OSName		:' $(OSName)
+	@echo 'CC		:' $(CC)
+	@echo 'CXX		:' $(CXX)

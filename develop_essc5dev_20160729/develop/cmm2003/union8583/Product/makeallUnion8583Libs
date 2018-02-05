@@ -1,0 +1,35 @@
+# 2004/12/07 Wolfgang Wang
+
+HOMEDIR=$CMM2003DIR/union8583
+
+clear
+echo 开始编译 union8583 所有库
+echo 按回车键继续
+read anykey
+
+clear
+echo 编译 union8583 2.0 版本
+echo 按回车键继续
+read anykey
+cd $HOMEDIR/version2.0/src
+mk2.0
+echo ""
+echo union8583 2.0 版本 编译结束
+echo 按回车键继续
+read anykey
+
+clear
+echo 编译 union8583 3.0 版本
+echo 按回车键继续
+read anykey
+cd $HOMEDIR/version3.x
+mk20081114
+echo ""
+echo union8583 3.0 版本 编译结束
+echo 按回车键继续
+read anykey
+
+clear
+echo 编译 union8583 结束
+echo 按回车键继续
+read anykey

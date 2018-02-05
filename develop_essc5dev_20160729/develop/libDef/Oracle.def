@@ -1,0 +1,4 @@
+dbTypeLibs=$(CMM2003LIBDIR)unionDataBaseType.oracle.o
+
+realDBLibs = 	$(CMM2003LIBDIR)unionRealBaseDB.oracle.2.0.o	\
+		-L$(ORACLE_LIB_DIR) -lclntsh

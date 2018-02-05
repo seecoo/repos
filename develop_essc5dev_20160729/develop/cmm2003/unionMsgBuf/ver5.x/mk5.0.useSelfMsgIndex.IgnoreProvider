@@ -1,0 +1,1 @@
+make -f 5.0.useSelfMsgIndex.IgnoreProvider.mk

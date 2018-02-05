@@ -1,0 +1,1425 @@
+//---------------------------------------------------------------------------
+
+
+//#pragma hdrstop
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#ifndef _WIN32_
+#include <unistd.h>
+#include <libgen.h>
+#else
+#include <windows.h>
+#include <vcl.h>
+#include <Filectrl.hpp>
+#include <io.h>
+#include <dir.h>
+#include <sys\stat.h>
+#define F_OK 0
+#endif
+
+#include "unionRecFile.h"
+#ifndef _WIN32_
+#include "unionREC.h"
+#else
+#include "unionRECVar.h"
+#endif
+
+#include "unionWorkingDir.h"
+#include "unionErrCode.h"
+#include "UnionLog.h"
+#include "UnionStr.h"
+
+//#include "unionRecFile.h"
+
+//----------------------------------------------------------------------------
+/*
+        Author: HuangBaoxin Date: 2008\11\11
+        功能：获取路径名
+        输入：FullFileName：文件名(包括绝对路径)
+        输出：Dir(文件所在路径名)
+        返回：0
+        例如：文件 C:\aa\bb\c.txt, 路径名C:\aa\bb
+*/
+int UnionGetDirExpFileName(char *FullFileName, char *Dir)
+{
+        int iIndex1, iIndex2 = 0;
+        /*
+        String strTmp1, strTmp2, strDir;
+        String fileName;
+        */
+        char    strTmp1[512 + 1], strTmp2[512 + 1], strDir[512 + 1];
+        char    fileName[512 + 1];
+        char    *pos;
+
+        memset(fileName, 0, sizeof(fileName));
+        strcpy(fileName, FullFileName);
+        
+        memset(strTmp1, 0, sizeof(strTmp1));
+        strcpy(strTmp1, FullFileName);
+
+#ifdef _WIN32_
+        pos     = strstr(strTmp1, "\\");
+#else
+        pos     = strstr(strTmp1, "/");
+#endif
+        // fileName = FullFileName;
+        // strTmp1 = FullFileName;
+        // iIndex1 = strTmp1.Pos("\\");
+        iIndex1 = pos - strTmp1;
+        iIndex2 += iIndex1;
+
+        while (iIndex1 > 0)
+        {
+                // strTmp2 = strTmp1.SubString(iIndex1+1, strlen(FullFileName) - iIndex1);
+                // strTmp1 = strTmp2;
+
+                memcpy(strTmp2, strTmp1 + iIndex1 + 1, strlen(FullFileName) - iIndex1);
+                strcpy(strTmp1, strTmp2);
+
+#ifdef _WIN32_
+                pos     = strstr(strTmp1, "\\");
+#else
+                pos     = strstr(strTmp1, "/");
+#endif
+                iIndex1 = pos - strTmp1;
+
+                if (iIndex1 >= 0)
+                        iIndex2 += iIndex1 + 1;
+
+                // iIndex1 = strTmp1.Pos("\\");
+                // iIndex2 += iIndex1;
+        }
+        /*
+        strDir = fileName.SubString(1, iIndex2 - 1);
+        memset(Dir, 0, sizeof(Dir));
+        strcpy(Dir, strDir.c_str());
+        */
+        memcpy(Dir, fileName, iIndex2);
+        
+        return 0;
+}
+//----------------------------------------------------------------------------
+/*
+功能	根据路径名和文件名拼装出文件全名
+输入参数
+	dirName	  路径名
+	fileName  文件名
+输出参数
+	fullFileName  文件全名
+返回值
+	>=0		文件全名长度
+	<0		出错代码
+*/
+int UnionFormFullFileName(char *dirName,char *fileName,char *fullFileName)
+{
+	if (dirName == NULL || fileName == NULL)
+	{
+		UnionUserErrLog("in UnionFormFullFileName:: dirName or fileName is null!\n");
+                return(errCodeParameter);
+	}
+
+	strcpy(fullFileName, dirName);
+	strcat(fullFileName, "/");
+	strcat(fullFileName, fileName);
+
+	return (strlen(fullFileName));
+}
+
+/*
+功能	从暂时目录恢复文件
+输入参数
+	oriFileName	源文件名称
+输出参数
+	无
+返回值
+	>=0		文件的大小
+	<0		出错代码
+*/
+int UnionRestoreFileFromTmpDir(char *oriFileName)
+{
+	char	nullFileName[256+1];
+	char	tmpDir[256+1];
+	char	tmpFileName[512+1];
+
+	memset(tmpDir,0,sizeof(tmpDir));
+	UnionGetTempWorkingDir(tmpDir);
+	memset(nullFileName,0,sizeof(nullFileName));
+	UnionReadFileNameFromFullDir(oriFileName,strlen(oriFileName),nullFileName);
+	sprintf(tmpFileName,"%s/%s",tmpDir,nullFileName);
+	return(UnionCopyFile(tmpFileName,oriFileName));
+}
+
+
+/*
+功能	备份一个文件到暂时目录
+输入参数
+	oriFileName	源文件名称
+输出参数
+	无
+返回值
+	>=0		文件的大小
+	<0		出错代码
+*/
+int UnionBackupFileToTmpDir(char *oriFileName)
+{
+	char	nullFileName[256+1];
+	char	tmpDir[256+1];
+	char	tmpFileName[512+1];
+	
+	if (!UnionExistsFile(oriFileName))
+		return(0); 
+	memset(tmpDir,0,sizeof(tmpDir));
+	UnionGetTempWorkingDir(tmpDir);
+	memset(nullFileName,0,sizeof(nullFileName));
+	UnionReadFileNameFromFullDir(oriFileName,strlen(oriFileName),nullFileName);
+	sprintf(tmpFileName,"%s/%s",tmpDir,nullFileName);
+	return(UnionCopyFile(oriFileName,tmpFileName));
+}
+
+//---------------------------------------------------------------------------
+/*
+功能	拷贝一个文件
+输入参数
+	oriFileName	源文件名称
+	desFileName	目标文件名
+输出参数
+	无
+返回值
+	>=0		文件的大小
+	<0		出错代码
+*/
+int UnionCopyFile(char *oriFileName,char *desFileName)
+{
+	char	tmpBuf[1024+1];
+	FILE	*fromFp,*toFp;
+	int	ret;
+	int	fileSize = 0;
+	
+	if ((oriFileName == NULL) || (desFileName == NULL))
+	{
+		UnionUserErrLog("in UnionCopyFile:: null pointer!\n");
+		return(errCodeParameter);
+	}
+	if ((fromFp = fopen(oriFileName,"rb")) == NULL)
+	{
+		UnionSystemErrLog("in UnionCopyFile:: fopen [%s]\n",oriFileName);
+		return(errCodeUseOSErrCode);
+	}
+	if ((toFp = fopen(desFileName,"wb")) == NULL)
+	{
+		UnionSystemErrLog("in UnionCopyFile:: fopen [%s]\n",desFileName);
+		fclose(fromFp);
+		return(errCodeUseOSErrCode);
+	}
+	while (!feof(fromFp))
+	{
+		memset(tmpBuf,0,sizeof(tmpBuf));
+		if ((ret = fread(tmpBuf,1,sizeof(tmpBuf)-1,fromFp)) < 0)
+			continue;
+		fwrite(tmpBuf,1,ret,toFp);
+		fileSize += ret;
+	}
+	fflush(toFp);
+	fclose(toFp);
+	fclose(fromFp);
+	return(fileSize);
+}
+
+/*
+功能	重命名一个文件
+输入参数
+	oriFileName	源文件名称
+	desFileName	目标文件名
+输出参数
+	无
+返回值
+	>=0		文件的大小
+	<0		出错代码
+*/
+int UnionRenameFile(char *oriFileName,char *desFileName)
+{
+	int	ret;
+	
+	if ((ret = UnionCopyFile(oriFileName,desFileName)) < 0)
+	{
+		UnionUserErrLog("in UnionRenameFile:: UnionCopyFile!\n");
+		return(ret);
+	}
+	UnionDeleteRecFile(oriFileName);
+	return(ret);
+}
+
+//---------------------------------------------------------------------------
+/*
+功能	重命名一个记录文件
+输入参数
+	oriFileName	源文件名称
+	desFileName	目标文件名
+输出参数
+	无
+返回值
+	>=0		记录数
+	<0		出错代码
+*/
+int UnionRenameRecFile(char *oriFileName,char *desFileName)
+{
+	char	tmpBuf[1024+1];
+	FILE	*fromFp,*toFp;
+	int	ret;
+	int	recNum;
+	
+	if ((oriFileName == NULL) || (desFileName == NULL))
+	{
+		UnionUserErrLog("in UnionRenameRecFile:: null pointer!\n");
+		return(errCodeParameter);
+	}
+	if ((fromFp = fopen(oriFileName,"r")) == NULL)
+	{
+		UnionSystemErrLog("in UnionRenameRecFile:: fopen [%s]\n",oriFileName);
+		return(errCodeUseOSErrCode);
+	}
+	if ((toFp = fopen(desFileName,"w")) == NULL)
+	{
+		UnionSystemErrLog("in UnionRenameRecFile:: fopen [%s]\n",desFileName);
+		fclose(fromFp);
+		return(errCodeUseOSErrCode);
+	}
+	recNum = 0;
+	while (!feof(fromFp))
+	{
+		memset(tmpBuf,0,sizeof(tmpBuf));
+		if ((ret = UnionReadOneLineFromTxtStr(fromFp,tmpBuf,sizeof(tmpBuf))) < 0)
+			continue;
+		fprintf(toFp,"%s\n",tmpBuf);
+		++recNum;
+	}
+	fflush(toFp);
+	fclose(toFp);
+	fclose(fromFp);
+	UnionDeleteRecFile(oriFileName);
+	return(recNum);
+}
+
+//---------------------------------------------------------------------------
+/*
+功能：  删除目录中的文件
+参数：
+        dir[IN]         需要被删除的目录名
+return:
+        -1              删除失败
+        0               删除成功
+*/
+int UnionDelDirFiles(char *dir)
+{        
+#ifdef _WIN32_
+	char            curWorkDir[512 + 1];
+        char            delDir[512 + 1];
+        struct ffblk    fblk;
+        int             done;
+        
+        if (!UnionExistsDir(dir))
+        {
+                return -1;
+        }
+
+        // 保存当前工作目录
+        memset(curWorkDir, 0, sizeof(curWorkDir));
+        getcwd(curWorkDir, sizeof(curWorkDir));
+
+        // 获取需要删除的目录路径
+        memset(delDir, 0, sizeof(delDir));
+        strcpy(delDir, dir);
+        strcat(delDir, "\\*");
+
+        done            = findfirst(delDir, &fblk, FA_RDONLY | FA_HIDDEN | FA_DIREC | FA_SYSTEM | FA_ARCH);
+        while (!done)
+        {
+                if(16 != fblk.ff_attrib)
+                {
+                        chmod(fblk.ff_name, S_IREAD | S_IWRITE);
+                        unlink(fblk.ff_name);
+                }
+
+                done    = findnext(&fblk);
+        }
+
+        findclose(&fblk);
+        chdir(curWorkDir);
+#endif
+	return 0;
+}
+//----------------------------------------------------------------------------
+// 获取一个文件的大小
+long UnionFileSize(char *fileName)
+{
+        FILE    *stream;
+        long    curPos, size;
+        
+        if (UnionExistsFile(fileName) <= 0)
+                return -1;
+        
+        stream  = fopen(fileName, "r");
+
+        if(NULL == stream)
+                return -1;
+
+
+        curPos  = ftell(stream);
+
+        fseek(stream, 0L, SEEK_END);
+        size    = ftell(stream);
+
+        fseek(stream, curPos, SEEK_SET);
+        
+        fclose(stream);
+
+        return size;
+}
+//---------------------------------------------------------------------------
+/*
+功能	从一个记录文件中读取一个记录串
+输入参数
+	fileName	记录文件名
+	sizeOfRecStr	接收记录串的缓冲的大小
+输出参数
+	recStr		读取的记录串
+返回值
+	>=0		记录串的长度
+	<0		出错代码
+*/
+int UnionReadRecStrFromFile(char *fileName,char *recStr,int sizeOfRecStr)
+{
+	int	ret;
+        // modify by wangcj, 2008-10-14
+	// char	tmpBuf[512+1];
+        // to
+        char	tmpBuf[3072+1];
+        // modify end.
+	FILE	*fp;
+	
+	if ((fileName == NULL) || (recStr == NULL))
+		return(errCodeParameter);
+	
+	if ((fp = fopen(fileName,"r")) == NULL)
+	{
+		UnionSystemErrLog("in UnionReadRecStrFromFile:: fopen [%s]\n",fileName);
+		return(errCodeUseOSErrCode);
+	}
+
+	while (!feof(fp))
+	{
+		memset(tmpBuf,0,sizeof(tmpBuf));
+		if ((ret = UnionReadOneLineFromTxtStr(fp,tmpBuf,sizeof(tmpBuf))) <= 0)
+			continue;
+		if (UnionIsUnixShellRemarkLine(tmpBuf))
+			continue;
+
+		if ((ret = strlen(tmpBuf)) >= sizeOfRecStr)
+		{
+			UnionUserErrLog("in UnionReadRecStrFromFile:: small buffer!\n");
+                        fclose(fp);
+			return(errCodeSmallBuffer);
+		}
+		strcpy(recStr,tmpBuf);
+		//UnionLog("*** [%s] [%s] [%d]\n",tmpBuf,recStr,ret);
+		break;
+	}
+	fclose(fp);
+	return(ret);
+}
+
+/*
+功能	将一个记录串写入到记录文件
+输入参数
+	fileName	记录文件名
+	recStr		记录串
+	lenOfRecStr	记录串的长度
+输出参数
+	无
+返回值
+	>=0		正确
+	<0		出错代码
+*/
+int UnionWriteRecStrIntoFile(char *fileName,char *recStr,int lenOfRecStr)
+{
+	int	ret;
+	FILE	*fp;
+	
+	if ((fileName == NULL) || (recStr == NULL))
+		return(errCodeParameter);
+
+	if ((fp = fopen(fileName,"wb")) == NULL)
+	{
+		UnionSystemErrLog("in UnionWriteRecStrIntoFile:: fopen [%s]\n",fileName);
+		return(errCodeUseOSErrCode);
+	}
+	fwrite(recStr,1,lenOfRecStr,fp);
+	fflush(fp);
+	fclose(fp);
+	return(0);
+}
+
+/*
+功能	将一个记录串追加到记录文件
+输入参数
+	fileName	记录文件名
+	recStr		记录串
+	lenOfRecStr	记录串的长度
+输出参数
+	无
+返回值
+	>=0		正确
+	<0		出错代码
+*/
+int UnionAppendRecStrToFile(char *fileName,char *recStr,int lenOfRecStr)
+{
+	int	ret;
+	FILE	*fp;
+	
+	if ((fileName == NULL) || (recStr == NULL))
+		return(errCodeParameter);
+		
+	if ((fp = fopen(fileName,"a+")) == NULL)
+	{
+		UnionSystemErrLog("in UnionAppendRecStrToFile:: fopen [%s]\n",fileName);
+		return(errCodeUseOSErrCode);
+	}
+	fprintf(fp,"%s\n",recStr);
+	fflush(fp);
+	fclose(fp);
+	return(0);
+}
+
+// Mary add begin, 2008-10-27
+/*
+功能	将一个记录串追加到记录文件，使用文件指针
+输入参数
+	hdl		文件指针
+	recStr		记录串
+	lenOfRecStr	记录串的长度
+输出参数
+	无
+返回值
+	>=0		正确
+	<0		出错代码
+*/
+int UnionAppendRecStrToFileUseFileHDL(TUnionRecFileHDL hdl,char *recStr,int lenOfRecStr)
+{
+	int	ret;
+	// FILE	*fp;
+	
+	if ((hdl == NULL) || (recStr == NULL))
+		return(errCodeParameter);
+	
+	fseek(hdl,0,SEEK_END);
+	fprintf(hdl,"%s\n",recStr);
+	fflush(hdl);
+	// fflush(fp);
+
+	return(0);
+}
+
+/* 
+功能	为写文件打开记录文件句柄
+输入参数
+	fileName	文件名称
+输出参数
+	无
+返回值
+	文件句柄
+	NULL		出错
+*/
+TUnionRecFileHDL UnionOpenRecFileHDLForWrite(char *fileName)
+{
+	FILE	*fp;
+	int	ret;
+	
+#ifdef _withFileLock_
+	if ((ret = UnionApplyRecWritingLockOfSpecRecWithTimeout("file",fileName,1)) < 0)
+	{
+		UnionUserErrLog("in UnionOpenRecFileHDLForWrite:: UnionApplyRecWritingLockOfSpecRecWithTimeout [%s] !\n",fileName);
+		return(NULL);
+	}
+#endif
+	fp=fopen(fileName,"w");
+	if (fp == NULL)
+	{
+		UnionUserErrLog("in UnionOpenRecFileHDLForWrite:: open [%s] for write fail!\n",fileName);
+		return(NULL);
+	}
+	return(fp);
+}
+// Mary add end, 2008-10-27
+
+/* 
+功能	打开记录文件句柄
+输入参数
+	fileName	文件名称
+输出参数
+	无
+返回值
+	文件句柄
+	NULL		出错
+*/
+TUnionRecFileHDL UnionOpenRecFileHDL(char *fileName)
+{
+	FILE	*fp;
+	int	ret;
+	
+#ifdef _withFileLock_
+	if ((ret = UnionApplyRecWritingLockOfSpecRecWithTimeout("file",fileName,1)) < 0)
+	{
+		UnionUserErrLog("in UnionOperRecFileHDL:: UnionApplyRecWritingLockOfSpecRecWithTimeout [%s] !\n",fileName);
+		return(NULL);
+	}
+#endif
+	fp=fopen(fileName,"r");
+	if (fp == NULL)
+	{
+		UnionUserErrLog("in UnionOperRecFileHDL:: open [%s] for read fail!\n",fileName);
+		return(NULL);
+	}
+	return(fp);
+}
+
+/* 
+功能	关柄记录文件句柄
+输入参数
+	hdl	文件句柄
+输出参数
+	无
+返回值
+	无
+*/
+void UnionCloseRecFileHDL(TUnionRecFileHDL hdl)
+{
+	if (hdl != NULL)
+		fclose(hdl);
+}
+
+/* 
+功能	关柄记录文件句柄
+输入参数
+	hdl	文件句柄
+输出参数
+	无
+返回值
+	无
+*/
+void UnionCloseRecFileHDLOfFileName(TUnionRecFileHDL hdl,char *fileName)
+{
+	if (hdl != NULL)
+		fclose(hdl);
+#ifdef _withFileLock_
+	UnionFreeRecWritingLockOfSpecRec("file",fileName);
+#endif
+}
+
+/* 
+功能	获得文件中的记录总数量
+输入参数
+	fileName	文件名称
+输出参数
+	无
+返回值
+	>=0		文件中的记录总数量
+	<0		出错代码
+*/
+int UnionGetTotalRecNumInFile(char *fileName)
+{
+	FILE	*fp;
+	int	iRet,iRecNum=0;
+	char	caBuf[1024];
+	
+	if (fileName == NULL)
+	{
+		UnionUserErrLog("in UnionGetTotalRecNumInFile:: null pointer!\n");
+		return(errCodeParameter);
+	}
+	
+	fp=fopen(fileName,"r");
+	if (fp == NULL)
+	{
+		UnionUserErrLog("in UnionGetTotalRecNumInFile:: open [%s] for read fail!\n",fileName);
+		return(errCodeUseOSErrCode);
+	}
+	
+	while(!feof(fp))
+	{
+		memset(caBuf,0,sizeof(caBuf));
+		iRet=UnionReadOneLineFromTxtStr(fp,caBuf,sizeof(caBuf));
+		if (iRet <= 0)
+			continue;
+		if (UnionIsUnixShellRemarkLine(caBuf))
+			continue;
+		iRecNum++;
+	}
+	
+	fclose(fp);
+	return(iRecNum);
+}
+
+/*
+功能	获得文件中所有记录的指定的域
+输入参数
+	fileName	文件名称
+	fldName		域名
+	maxNum		读出的最大数量
+输出参数
+	无
+返回值
+	>=0		读出的总数量
+	<0		出错代码
+*/
+int UnionReadAllRecFldInFile(char *fileName,char *fldName,char fldValue[][128+1],int maxNum)
+{
+	FILE	*fp;
+	int	iRet,iRecNum=0;
+	char	caBuf[3072 + 1];
+	int	fldLen;
+	
+	if (fileName == NULL)
+	{
+		UnionUserErrLog("in UnionReadAllRecFldInFile:: null pointer!\n");
+		return(errCodeParameter);
+	}
+	
+	fp=fopen(fileName,"r");
+	if (fp == NULL)
+	{
+		UnionUserErrLog("in UnionReadAllRecFldInFile:: open [%s] for read fail!\n",fileName);
+		return(errCodeUseOSErrCode);
+	}
+	
+	while(!feof(fp))
+	{
+		if (iRecNum >= maxNum)
+			break;
+		memset(caBuf,0,sizeof(caBuf));
+		iRet=UnionReadOneLineFromTxtStr(fp,caBuf,sizeof(caBuf));
+		if (iRet <= 0)
+			continue;
+		if (UnionIsUnixShellRemarkLine(caBuf))
+			continue;
+		if ((fldLen = UnionReadRecFldFromRecStr(caBuf,iRet,fldName,fldValue[iRecNum],sizeof(fldValue[iRecNum]))) < 0)
+			continue;
+		iRecNum++;
+	}
+	
+	fclose(fp);
+	return(iRecNum);
+}
+
+/*
+功能	从文件中读取下一条记录
+输入参数
+	hdl		文件指针
+	sizeOfRecStr	接收记录的缓冲的大小
+输出参数
+	recStr		读取的记录
+返回值
+	>=0		读取的记录大小,=0,表示文件中已无后续记录
+	<0		出错代码
+*/
+int UnionReadNextRecFromFile(TUnionRecFileHDL hdl,char *recStr,int sizeOfRecStr)
+{
+	int	iLen;
+	
+	if ((hdl == NULL) || (recStr == NULL))
+	{
+		UnionUserErrLog("in UnionReadNextRecFromFile:: null pointer!\n");
+		return(errCodeParameter);
+	}
+	while(!feof(hdl))
+	{
+		memset(recStr,0,sizeOfRecStr);
+		if ((iLen=UnionReadOneLineFromTxtStr(hdl,recStr,sizeOfRecStr)) <= 0)
+			continue;
+		if (UnionIsUnixShellRemarkLine(recStr))
+			continue;
+		return(iLen);
+	}
+	return(0);
+}
+
+/* 
+功能	从文件中读取指定索引的记录
+输入参数
+	hdl		文件指针
+	index		记录索引号
+	sizeOfRecStr	接收记录的缓冲的大小
+输出参数
+	recStr		读取的记录
+返回值
+	>=0		读取的记录大小,=0,表示文件中已无记录
+	<0		出错代码
+*/
+int UnionReadRecOfIndexFromFile(TUnionRecFileHDL hdl,unsigned int index,char *recStr,int sizeOfRecStr)
+{
+	int	iLen;
+	int	recNum = 0;
+	
+	if ((hdl == NULL) || (recStr == NULL))
+	{
+		UnionUserErrLog("in UnionReadNextRecFromFile:: null pointer!\n");
+		return(errCodeParameter);
+	}
+	fseek(hdl,0,SEEK_SET);
+	while(!feof(hdl))
+	{
+		memset(recStr,0,sizeOfRecStr);
+		if ((iLen=UnionReadOneLineFromTxtStr(hdl,recStr,sizeOfRecStr)) <= 0)
+			continue;
+		if (UnionIsUnixShellRemarkLine(recStr))
+			continue;
+		if (recNum == index)
+			return(iLen);
+		recNum++;
+	}
+	return(0);
+}
+
+/* 
+功能	从文件中读取指定索引的记录
+输入参数
+	fileName	文件名称
+	index		记录索引号
+	sizeOfRecStr	接收记录的缓冲的大小
+输出参数
+	recStr		读取的记录
+返回值
+	>=0		读取的记录大小,=0,表示文件中已无后续记录
+	<0		出错代码
+*/
+int UnionReadRecOfIndexDirectlyFromFile(char *fileName,unsigned int index,char *recStr,int sizeOfRecStr)
+{
+	int	iLen;
+	int	recNum = 0;
+        FILE    *fp;
+	
+	if ((fileName == NULL) || (recStr == NULL))
+	{
+		UnionUserErrLog("in UnionReadRecOfIndexDirectlyFromFile:: null pointer!\n");
+		return(errCodeParameter);
+	}
+	
+	fp=fopen(fileName,"r");
+	if (fp == NULL)
+	{
+		UnionUserErrLog("in UnionReadRecOfIndexDirectlyFromFile:: open [%s] for read fail!\n",fileName);
+		return(errCodeUseOSErrCode);
+	}
+	
+	while(!feof(fp))
+	{
+		memset(recStr,0,sizeOfRecStr);
+		if ((iLen=UnionReadOneLineFromTxtStr(fp,recStr,sizeOfRecStr)) <= 0)
+			continue;
+		if (UnionIsUnixShellRemarkLine(recStr))
+			continue;
+		if (recNum == index)
+                {       fclose(fp);
+			return(iLen);
+                }
+		recNum++;
+	}
+        fclose(fp);
+	return(0);
+}
+//---------------------------------------------------------------------------
+/*
+功能    按照升序对一个文件的内容进行排序
+输入参数
+	fileName	记录文件名
+输出参数
+	无
+返回值
+	>=0		排序成功
+	<0		出错代码
+*/
+int UnionSortFileContentInAscOrder(char *fileName)
+{
+        int	ret;
+	char	tmpBuf[512+1];
+	char	tmpFileName[512+1];
+	FILE	*fromFp,*toFp;
+	int	recNum = 0;
+
+	if (fileName == NULL)
+		return(errCodeParameter);
+
+        // 空文件，无内容
+        if (UnionFileSize(fileName) <= 0)
+                return 0;
+
+        // 从源文件写到一个暂时文件
+	if ((fromFp = fopen(fileName,"r")) == NULL)
+	{
+		UnionSystemErrLog("in UnionSortFileContentInAscOrder:: fopen [%s]\n",fileName);
+		return(errCodeUseOSErrCode);
+	}
+
+        // 创建一个临时文件，用于保存源文件的有序内容
+        sprintf(tmpFileName,"%s.tmp",fileName);
+	if ((toFp = fopen(tmpFileName,"w")) == NULL)
+	{
+		UnionSystemErrLog("in UnionSortFileContentInAscOrder:: fopen [%s]\n",tmpFileName);
+		fclose(fromFp);
+		return(errCodeUseOSErrCode);
+	}
+        fclose(toFp);
+
+        while (!feof(fromFp))
+	{
+		memset(tmpBuf,0,sizeof(tmpBuf));
+		if ((ret = UnionReadOneLineFromTxtStr(fromFp,tmpBuf,sizeof(tmpBuf))) < 0)
+			continue;
+		if (ret == 0)
+			continue;
+                if ((ret = UnionInsertRecStrToFileInAscOrder(tmpFileName, tmpBuf, strlen(tmpBuf))) < 0)
+                {
+                        UnionSystemErrLog("In UnionSortFileContentInAscOrder:: UnionInsertRecStrToFileInAscOrder error, ret is: [%d].\n", ret);
+                        fclose(fromFp);
+                        UnionDeleteRecFile(tmpFileName);
+                        return ret;
+                }
+	}
+        fclose(fromFp);
+
+	// 从暂时文件写回源文件
+	if ((ret = UnionRenameRecFile(tmpFileName,fileName)) < 0)
+	{
+		UnionUserErrLog("in UnionSortFileContentInAscOrder:: UnionRenameRecFile [%s] to [%s]\n",tmpFileName,fileName);
+		return(ret);
+	}
+}
+//---------------------------------------------------------------------------
+/*
+功能    按照降序对一个文件的内容进行排序
+输入参数
+	fileName	记录文件名
+输出参数
+	无
+返回值
+	>=0		排序成功
+	<0		出错代码
+*/
+int UnionSortFileContentInDesOrder(char *fileName)
+{
+        int	ret;
+	char	tmpBuf[512+1];
+	char	tmpFileName[512+1];
+	FILE	*fromFp,*toFp;
+	int	recNum = 0;
+
+	if (fileName == NULL)
+		return(errCodeParameter);
+
+        // 空文件，无内容
+        if (UnionFileSize(fileName) <= 0)
+                return 0;
+
+        // 从源文件写到一个暂时文件
+	if ((fromFp = fopen(fileName,"r")) == NULL)
+	{
+		UnionSystemErrLog("in UnionSortFileContentInDesOrder:: fopen [%s]\n",fileName);
+		return(errCodeUseOSErrCode);
+	}
+
+        // 创建一个临时文件，用于保存源文件的有序内容
+        sprintf(tmpFileName,"%s.tmp",fileName);
+	if ((toFp = fopen(tmpFileName,"w")) == NULL)
+	{
+		UnionSystemErrLog("in UnionSortFileContentInDesOrder:: fopen [%s]\n",tmpFileName);
+		fclose(fromFp);
+		return(errCodeUseOSErrCode);
+	}
+        fclose(toFp);
+
+        while (!feof(fromFp))
+	{
+		memset(tmpBuf,0,sizeof(tmpBuf));
+		if ((ret = UnionReadOneLineFromTxtStr(fromFp,tmpBuf,sizeof(tmpBuf))) < 0)
+			continue;
+		if (ret == 0)
+			continue;
+                if ((ret = UnionInsertRecStrToFileInDesOrder(tmpFileName, tmpBuf, strlen(tmpBuf))) < 0)
+                {
+                        UnionSystemErrLog("In UnionSortFileContentInDesOrder:: UnionInsertRecStrToFileInAscOrder error, ret is: [%d].\n", ret);
+                        fclose(fromFp);
+                        UnionDeleteRecFile(tmpFileName);
+                        return ret;
+                }
+	}
+        fclose(fromFp);
+
+	// 从暂时文件写回源文件
+	if ((ret = UnionRenameRecFile(tmpFileName,fileName)) < 0)
+	{
+		UnionUserErrLog("in UnionSortFileContentInDesOrder:: UnionRenameRecFile [%s] to [%s]\n",tmpFileName,fileName);
+		return(ret);
+	}
+	return(ret);	
+}
+//---------------------------------------------------------------------------
+
+/*
+功能	按照降序的方式在一个记录文件中插入一个记录串
+条件    记录文件本身就是一个按照降序方式排列的文件
+输入参数
+	fileName	记录文件名
+	recStr		要删除的记录串
+	lenOfRecStr	记录串的长度
+输出参数
+	无
+返回值
+	>=0		插入成功
+	<0		出错代码
+*/
+int UnionInsertRecStrToFileInDesOrder(char *fileName,char *recStr,int lenOfRecStr)
+{
+	return(UnionInsertRecStrToFileInOrderByFld(fileName,recStr,lenOfRecStr,"",0));
+}
+//---------------------------------------------------------------------------
+/*
+功能	按照升序的方式在一个记录文件中插入一个记录串
+条件    记录文件本身就是一个按照升序方式排列的文件
+输入参数
+	fileName	记录文件名
+	recStr		要删除的记录串
+	lenOfRecStr	记录串的长度
+输出参数
+	无
+返回值
+	>=0		插入成功
+	<0		出错代码
+*/
+int UnionInsertRecStrToFileInAscOrder(char *fileName,char *recStr,int lenOfRecStr)
+{
+	return(UnionInsertRecStrToFileInOrderByFld(fileName,recStr,lenOfRecStr,"",1));
+}
+
+//---------------------------------------------------------------------------
+/*
+功能	按照升序的方式在一个记录文件中插入一个记录串
+条件    记录文件本身就是一个按照升序方式排列的文件
+输入参数
+	fileName	记录文件名
+	recStr		要删除的记录串
+	lenOfRecStr	记录串的长度
+	fldName		根据该域来排序
+	isAscOrder	排序方式，１升序，０除序
+输出参数
+	无
+返回值
+	>=0		插入成功
+	<0		出错代码
+*/
+int UnionInsertRecStrToFileInOrderByFld(char *fileName,char *recStr,int lenOfRecStr,char *fldName,int isAscOrder)
+{
+	int	ret;
+	char	tmpBuf[512+1];
+	char	tmpFileName[512+1];
+	FILE	*fromFp,*toFp;
+	int	recNum = 0;
+	int	isInserted = 0;
+	
+	if ((fileName == NULL) || (recStr == NULL))
+		return(errCodeParameter);
+		
+        // 空文件
+        if (UnionFileSize(fileName) <= 0)
+        {
+                return UnionWriteRecStrIntoFile(fileName, recStr, lenOfRecStr);
+        }
+          
+	// 从源文件写到一个暂时文件
+	if ((fromFp = fopen(fileName,"r")) == NULL)
+	{
+		UnionSystemErrLog("in UnionInsertRecStrToFileInOrderByFld:: fopen [%s]\n",fileName);
+		return(errCodeUseOSErrCode);
+	}
+        sprintf(tmpFileName,"%s.tmp",fileName);
+	if ((toFp = fopen(tmpFileName,"w")) == NULL)
+	{
+		UnionSystemErrLog("in UnionInsertRecStrToFileInOrderByFld:: fopen [%s]\n",tmpFileName);
+		fclose(fromFp);
+		return(errCodeUseOSErrCode);
+	}
+	while (!feof(fromFp))
+	{
+		memset(tmpBuf,0,sizeof(tmpBuf));
+		if ((ret = UnionReadOneLineFromTxtStr(fromFp,tmpBuf,sizeof(tmpBuf))) < 0)
+			continue;
+		if (ret == 0)
+			continue;
+        	if (isInserted)	// 已插入
+                {
+                        fprintf(toFp,"%s\n",tmpBuf);
+                        continue;
+                }
+		if ((ret = UnionCompare2RecStr(recStr,lenOfRecStr,tmpBuf,ret,fldName)) >= 0)	// 要插入的记录大于当前记录
+		{
+			if (!isAscOrder)	// 降序
+				goto insertNow;
+			fprintf(toFp,"%s\n",tmpBuf);
+		}
+		else if (ret == -1)	// 要插入的记录小于当前记录
+		{
+			if (isAscOrder)	// 升序
+				goto insertNow;
+			fprintf(toFp,"%s\n",tmpBuf);
+		}
+		else
+		{
+			UnionSystemErrLog("in UnionInsertRecStrToFileInOrderByFld:: UnionCompare2RecStr [%s] [%s] on fldName [%s]\n",recStr,tmpBuf,fldName);
+			fclose(fromFp);
+			fclose(toFp);
+			UnionDeleteRecFile(tmpFileName);
+			return(ret);
+		}
+		continue;
+insertNow:
+		fprintf(toFp,"%s\n",recStr);
+		fprintf(toFp,"%s\n",tmpBuf);
+		isInserted = 1;
+		continue;
+	}
+	// 没有插入记录
+        if (!isInserted)
+                fprintf(toFp, "%s\n", recStr);
+	fflush(toFp);
+	fclose(toFp);
+	fclose(fromFp);
+	if ((ret = UnionRenameRecFile(tmpFileName,fileName)) < 0)
+	{
+		UnionUserErrLog("in UnionInsertRecStrToFileInOrderByFld:: UnionRenameRecFile [%s] to [%s]\n",tmpFileName,fileName);
+		return(ret);
+	}
+	return(ret);	
+}
+
+//---------------------------------------------------------------------------
+/*
+功能	从一个记录文件中删除一个记录串
+输入参数
+	fileName	记录文件名
+	recStr		要删除的记录串
+	lenOfRecStr	记录串的长度
+输出参数
+	无
+返回值
+	>=0		删除的记录数
+	<0		出错代码
+*/
+int UnionDeleteRecStrFromFile(char *fileName,char *recStr,int lenOfRecStr)
+{
+	return(UnionDeleteRecStrFromFileByFld(fileName,recStr,lenOfRecStr,""));
+}
+
+// 判断是否存在记录文件
+int UnionExistsFile(char *fileName)
+{
+#ifndef _WIN32_
+	if (access(fileName,F_OK) == 0)
+#else
+        if (FileExists(fileName))
+#endif
+		return(1);
+	else
+		return(0);
+}
+
+// 删除文件
+int UnionDeleteFile(char *fileName)
+{
+	return(UnionDeleteRecFile(fileName));
+}
+
+// 删除文件
+int UnionDeleteRecFile(char *fileName)
+{
+	// 删除记录文件
+	if (unlink(fileName) < 0)
+	{
+		UnionSystemErrLog("in UnionDeleteRecFile:: unlink %s fail!\n",fileName);
+		return(errCodeUseOSErrCode);
+	}
+	return(0);
+}
+
+// 创建一个目录
+int UnionCreateDir(char *dir)
+{
+	char	tmpBuf[512];
+	
+	if (dir == NULL)
+	{
+		UnionUserErrLog("in UnionCreateDir:: dir is null!\n");
+		return(errCodeParameter);
+	}
+#ifdef _WIN32_
+        if (CreateDir(dir))
+        	return(0);
+        else
+        	return(errCodeUseOSErrCode);
+#else
+	memset(tmpBuf,0,sizeof(tmpBuf));
+	sprintf(tmpBuf,"mkdir %s",dir);
+	return(0-abs(system(tmpBuf)));
+#endif
+}
+
+// 删除一个目录
+int UnionRemoveDir(char *dir)
+{
+	char	tmpBuf[512];
+	
+	if (dir == NULL)
+	{
+		UnionUserErrLog("in UnionRemoveDir:: dir is null!\n");
+		return(errCodeParameter);
+	}
+#ifdef _WIN32_
+        if (RemoveDir(dir))
+        {
+        	UnionLog("in UnionRemoveDir:: RemoveDir [%s] success!\n",dir);
+        	return(0);
+        }
+        else
+        {
+        	UnionUserErrLog("in UnionRemoveDir:: RemoveDir [%s] success!\n",dir);
+        	return(errCodeUseOSErrCode);
+        }
+#else
+	memset(tmpBuf,0,sizeof(tmpBuf));
+	sprintf(tmpBuf,"rm -r %s",dir);
+	return(0-abs(system(tmpBuf)));
+#endif
+}
+
+// 检查一个目录是否存在
+// 1存在，0不存在
+int UnionExistsDir(char *dir)
+{
+	if (dir == NULL)
+	{
+		UnionUserErrLog("in UnionExistsDir:: dir is null!\n");
+		return(0);
+	}
+#ifndef _WIN32_
+	if (access(dir,F_OK) == 0)
+#else
+        if (DirectoryExists(dir))
+#endif
+		return(1);
+	else
+		return(0);
+}
+
+/*
+  描述: 判断一个文件是否存在，不存在则建立它
+  输入: fileName - 文件名; dirName - 文件路径
+  输出: 无
+  返回: =0 - 成功
+        <0 - 失败
+*/
+int
+UnionExistAndCreateFile(char *fileName, char *dirName)
+{
+        int    ret;
+        char   fullName[512+1];
+        char   cmd[300+1];
+
+        memset(fullName, 0, sizeof fullName);
+        memset(cmd, 0, sizeof cmd);
+        if (fileName == NULL || dirName == NULL)
+        {
+        	return(errCodeParameter);
+        }
+
+	UnionFormFullFileName(dirName, fileName, fullName);
+        if ( !UnionExistsFile(fullName) ) /* 文件不存在 */
+        {
+                /* 建立目录 */
+                UnionExistAndCreateDir(dirName);
+                strcpy(cmd,">");
+                strcat(cmd,fullName);
+                strcat(cmd," 1>/dev/null 2>&1");
+		return(0-abs(system(cmd)));
+        }
+        return 0;
+}
+
+/*
+  描述: 判断一个目录是否存在，不存在则建立它,
+        如果路径中的某个目录不存在一起建立
+  输入: dir - 目录路径
+  输出: 无
+  返回: =0 - 成功
+        <0 - 失败
+*/
+int
+UnionExistAndCreateDir(char *dir)
+{
+        char cmd[300+1];
+        char tmpdir[256+1];
+
+        memset(cmd, 0, sizeof cmd);
+        memset(tmpdir, 0, sizeof tmpdir);
+
+        if ( (strcmp(dir,"/") !=0 && access(dir, F_OK)!=0) )
+        {
+                #ifndef _WIN32_
+                strcpy(tmpdir, dirname(dir));
+                #else
+                UnionGetDirExpFileName(dir, tmpdir);
+                #endif
+                UnionExistAndCreateDir(tmpdir);
+        }
+        else
+                return 0;
+        strcpy(cmd, "mkdir ");
+        strcat(cmd, dir);
+	return(0-abs(system(cmd)));
+}
+
+/*
+  描述: 判断一个目录是否存在，不存在则建立它,
+        如果路径中的某个目录不存在一起建立
+  输入: fullFileName - 文件全名(带路径)
+  输出: 无
+  返回: =0 - 成功
+        <0 - 失败
+*/
+int
+UnionExistAndCreateDirFromFullFileName(char *fullFileName)
+{
+        char dir[256+1];
+
+        memset(dir, 0, sizeof dir);
+        UnionGetDirExpFileName(fullFileName,dir);
+	//strcpy(dir, dirname(fullFileName));
+	UnionExistAndCreateDir(dir);
+        return 0;
+}
+
+
+
+//---------------------------------------------------------------------------
+/*
+功能	从一个记录文件中删除一个记录串
+输入参数
+	fileName	记录文件名
+	recStr		要删除的记录串
+	lenOfRecStr	记录串的长度
+	fldName		要删除的域
+输出参数
+	无
+返回值
+	>=0		删除的记录数
+	<0		出错代码
+*/
+int UnionDeleteRecStrFromFileByFld(char *fileName,char *recStr,int lenOfRecStr,char *fldName)
+{
+	int	ret;
+	char	tmpBuf[512+1];
+	char	tmpFileName[512+1];
+	FILE	*fromFp,*toFp;
+	int	recNum = 0;
+
+	if ((fileName == NULL) || (recStr == NULL))
+		return(errCodeParameter);
+
+	// 从源文件写到一个暂时文件
+	if ((fromFp = fopen(fileName,"r")) == NULL)
+	{
+		UnionSystemErrLog("in UnionDeleteRecStrFromFileByFld:: fopen [%s]\n",fileName);
+		return(errCodeUseOSErrCode);
+	}
+	sprintf(tmpFileName,"%s.tmp",fileName);
+	if ((toFp = fopen(tmpFileName,"w")) == NULL)
+	{
+		UnionSystemErrLog("in UnionDeleteRecStrFromFileByFld:: fopen [%s]\n",tmpFileName);
+		fclose(fromFp);
+		return(errCodeUseOSErrCode);
+	}
+	while (!feof(fromFp))
+	{
+		memset(tmpBuf,0,sizeof(tmpBuf));
+		if ((ret = UnionReadOneLineFromTxtStr(fromFp,tmpBuf,sizeof(tmpBuf))) < 0)
+			continue;
+		if (ret == 0)
+			continue;
+		if ((ret = UnionCompare2RecStr(recStr,lenOfRecStr,tmpBuf,ret,fldName)) != 0)	// 与当前值不符
+			fprintf(toFp,"%s\n",tmpBuf);
+	}
+	fflush(toFp);
+	fclose(toFp);
+	fclose(fromFp);
+	
+	if ((ret = UnionRenameRecFile(tmpFileName,fileName)) < 0)
+	{
+		UnionUserErrLog("in UnionDeleteRecStrFromFileByFld:: UnionRenameRecFile [%s] to [%s]\n",tmpFileName,fileName);
+		return(ret);
+	}
+	return(ret);	
+}
+
+//---------------------------------------------------------------------------
+/*
+功能	比较两个记录串的是否一致
+输入参数
+	recStr1		记录串1
+	lenOfRecStr1	记录串的长度
+	recStr2		记录串2
+	lenOfRecStr2	记录串的长度
+	fldName		要比较的域名
+输出参数
+	无
+返回值
+	=0		相同
+	-1		第一个串比第二个串小
+	=1		第一个串比第三个串大
+	<0		出错代码（非-1)
+*/
+int UnionCompare2RecStr(char *recStr1,int lenOfRecStr1,char *recStr2,int lenOfRecStr2,char *fldName)
+{
+	int	ret;
+	char	fld1[512+1],fld2[512+1];
+	char	*fld1Str,*fld2Str;
+
+	if ((recStr1 == NULL) || (recStr2 == NULL))
+		return(errCodeParameter);
+
+	if ((fldName != NULL) && (strlen(fldName) != 0))
+	{
+		memset(fld1,0,sizeof(fld1));
+		if ((ret = UnionReadRecFldFromRecStr(recStr1,lenOfRecStr1,fldName,fld1,sizeof(fld1))) < 0)
+		{
+			UnionUserErrLog("in UnionCompare2RecStr:: UnionReadRecFldFromRecStr [%s] from [%s]\n",fldName,recStr1);
+			return(ret);
+		}
+		fld1Str = fld1;
+		memset(fld2,0,sizeof(fld2));
+		if ((ret = UnionReadRecFldFromRecStr(recStr2,lenOfRecStr2,fldName,fld2,sizeof(fld2))) < 0)
+		{
+			UnionUserErrLog("in UnionCompare2RecStr:: UnionReadRecFldFromRecStr [%s] from [%s]\n",fldName,recStr2);
+			return(ret);
+		}
+		fld2Str = fld2;
+	}
+	else
+	{
+		fld1Str = recStr1;
+		fld2Str = recStr2;
+	}
+	if ((ret = strcmp(fld1Str,fld2Str)) < 0)
+		return(-1);
+	return(ret);
+}
+
+//---------------------------------------------------------------------------------
+//#pragma package(smart_init)

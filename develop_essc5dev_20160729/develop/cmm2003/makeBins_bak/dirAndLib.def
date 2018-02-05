@@ -1,0 +1,3 @@
+include ../libDef/etcUseDB.def
+include ../libDef/$(RunningDBType).def
+include ../libDef/libList.def
