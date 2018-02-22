@@ -1,6 +1,0 @@
-sharedDBSpecLibs=$(CMM2003LIBDIR)unionTask.db.20130301.o	\
-		$(CMM2003LIBDIR)unionLogTBL.db.20140912.o	\
-		$(CMM2003LIBDIR)unionREC.db.20130301.o
-
-msgBufEtcLibs=$(CMM2003LIBDIR)unionMsgBuf.defFile.20131201.o
-

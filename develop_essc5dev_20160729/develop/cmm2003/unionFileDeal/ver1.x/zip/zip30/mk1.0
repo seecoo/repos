@@ -1,4 +1,0 @@
-make -f unix/Makefile clean
-make -f unix/Makefile generic
-cp libzip.a /dpProductHouseWare/libLibs/
-

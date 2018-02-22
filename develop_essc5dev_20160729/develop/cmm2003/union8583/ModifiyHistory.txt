@@ -1,7 +1,0 @@
-Modifiy History::
-
-2002/8/1, Wolfgang Wang
-完成了UnionEmu8583_3.0.a的开发。
-
-2002/8/21, Wolfgang Wang
-完成了Union8583_3.0.a的开发

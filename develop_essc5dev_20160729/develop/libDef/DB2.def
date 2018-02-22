@@ -1,5 +1,0 @@
-dbTypeLibs=$(CMM2003LIBDIR)unionDataBaseType.db2.o
-
-realDBLibs = 	$(CMM2003LIBDIR)unionRealBaseDB.db2cli.2.0.o	\
-		-L$(DB2LIBDIR) -ldb2
-
